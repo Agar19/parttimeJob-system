@@ -89,6 +89,20 @@ CREATE TABLE availability (
     CHECK (end_time > start_time)
 );
 
+-- Add Schedule Settings table
+CREATE TABLE schedule_settings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    schedule_id UUID REFERENCES schedules(id) ON DELETE CASCADE,
+    selected_days TEXT, -- JSON array of selected days of week (0-6)
+    start_time TIME NOT NULL DEFAULT '07:00',
+    end_time TIME NOT NULL DEFAULT '23:00',
+    min_gap_between_shifts INTEGER, -- Minimum hours between shifts
+    min_shifts_per_employee INTEGER, -- Minimum shifts per employee
+    max_shifts_per_employee INTEGER, -- Maximum shifts per employee
+    additional_notes TEXT,
+    UNIQUE(schedule_id)
+);
+
 -- Create indexes for performance
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_employees_user_id ON employees(user_id);

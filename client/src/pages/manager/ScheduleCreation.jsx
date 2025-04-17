@@ -1,4 +1,4 @@
-// client/src/pages/manager/ScheduleCreation.jsx (updated)
+// client/src/pages/manager/ScheduleCreation.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
@@ -15,18 +15,19 @@ const ScheduleCreation = () => {
   const [selectedWeek, setSelectedWeek] = useState(startOfWeek(new Date()));
   const [schedules, setSchedules] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   
   // Enhanced modal data for schedule creation
   const [modalData, setModalData] = useState({
-    scheduleName: '',
+    scheduleName: 'New Schedule',
     selectedDays: {
       0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true // All days selected by default
     },
     startTime: '07:00',
     endTime: '15:00',
-    minGapBetweenShifts: 'Сонгох',
-    minShiftsPerEmployee: 'Сонгох',
-    maxShiftsPerEmployee: 'Сонгох',
+    minGapBetweenShifts: '8',
+    minShiftsPerEmployee: '1',
+    maxShiftsPerEmployee: '5',
     additionalNotes: ''
   });
 
@@ -58,21 +59,34 @@ const ScheduleCreation = () => {
     fetchData();
   }, [branchId]);
 
-
-
   const handleCreateSchedule = async () => {
     try {
       setLoading(true);
+      setError('');
       
       // Format date for API
       const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
+      
+      // Extract selected days as array of day indices
+      const selectedDaysArray = Object.keys(modalData.selectedDays)
+        .filter(day => modalData.selectedDays[day])
+        .map(day => parseInt(day));
+      
+      console.log("Creating schedule with the following parameters:");
+      console.log("Branch ID:", branchId);
+      console.log("Week Start:", formattedDate);
+      console.log("Selected Days:", selectedDaysArray);
+      console.log("Shift Time Range:", `${modalData.startTime} - ${modalData.endTime}`);
+      console.log("Min Gap Between Shifts:", modalData.minGapBetweenShifts);
+      console.log("Min Shifts Per Employee:", modalData.minShiftsPerEmployee);
+      console.log("Max Shifts Per Employee:", modalData.maxShiftsPerEmployee);
       
       // Create schedule with enhanced data
       const response = await api.post('/schedules', {
         branchId,
         weekStart: formattedDate,
-        scheduleName: modalData.scheduleName,
-        selectedDays: Object.keys(modalData.selectedDays).filter(day => modalData.selectedDays[day]),
+        scheduleName: modalData.scheduleName || 'New Schedule',
+        selectedDays: selectedDaysArray,
         startTime: modalData.startTime,
         endTime: modalData.endTime,
         minGapBetweenShifts: modalData.minGapBetweenShifts,
@@ -81,14 +95,32 @@ const ScheduleCreation = () => {
         additionalNotes: modalData.additionalNotes
       });
       
-      // Generate shifts automatically
-      await api.post(`/schedules/${response.data.scheduleId}/generate`);
+      console.log("Schedule created successfully:", response.data);
       
-      // Navigate to the schedule view
-      navigate(`/manager/schedule/${response.data.scheduleId}`);
+      // Generate shifts automatically using the algorithm
+      if (response.data && response.data.scheduleId) {
+        const scheduleId = response.data.scheduleId;
+        console.log("Generating shifts for schedule ID:", scheduleId);
+        
+        try {
+          const generateResponse = await api.post(`/schedules/${scheduleId}/generate`);
+          console.log("Shifts generated successfully:", generateResponse.data);
+          
+          // Navigate to the schedule view
+          navigate(`/manager/schedule/${scheduleId}`);
+        } catch (genError) {
+          console.error("Error generating shifts:", genError);
+          setError(`Shifts created, but auto-assignment failed: ${genError.response?.data?.error?.message || genError.message}. You can assign shifts manually.`);
+          
+          // Still navigate to the schedule view so they can assign manually
+          navigate(`/manager/schedule/${scheduleId}`);
+        }
+      } else {
+        setError('Invalid response from server when creating schedule');
+      }
     } catch (err) {
-      setError('Failed to create schedule');
-      console.error(err);
+      console.error('Create schedule error:', err);
+      setError(`Failed to create schedule: ${err.response?.data?.error?.message || err.message}`);
     } finally {
       setLoading(false);
     }
@@ -117,59 +149,96 @@ const ScheduleCreation = () => {
     return days;
   };
 
-// Add a new function for auto-generation
-const handleAutoGenerateSchedule = async () => {
-  try {
-    setLoading(true);
-    setError('');
-    
-    // Format date for API
-    const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
-    
-    // Create schedule
-    const response = await api.post('/schedules', {
-      branchId,
-      weekStart: formattedDate
-    });
-    
-    // Generate shifts automatically
-    await api.post(`/schedules/${response.data.scheduleId}/generate`);
-    
-    // Navigate to the schedule view
-    navigate(`/manager/schedule/${response.data.scheduleId}`);
-  } catch (err) {
-    setError('Failed to auto-generate schedule');
-    console.error(err);
-  } finally {
-    setLoading(false);
-  }
-};
+  // Improved auto-generation function with robust error handling
+  const handleAutoGenerateSchedule = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      if (employees.length === 0) {
+        setError("Cannot generate schedule: No employees available for this branch.");
+        setLoading(false);
+        return;
+      }
+      
+      // Format date for API
+      const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
+      
+      console.log('Creating auto-generated schedule with start date:', formattedDate);
+      
+      // Create schedule with all data needed for the algorithm
+      const scheduleData = {
+        branchId,
+        weekStart: formattedDate,
+        scheduleName: 'Auto-generated Schedule',
+        selectedDays: [0, 1, 2, 3, 4, 5, 6], // All days of the week
+        startTime: '07:00',
+        endTime: '23:00',
+        minGapBetweenShifts: '8',  // 8 hours minimum between shifts
+        minShiftsPerEmployee: '1', // At least 1 shift per employee
+        maxShiftsPerEmployee: '5'  // Maximum 5 shifts per employee
+      };
+      
+      console.log("Sending schedule data:", scheduleData);
+      
+      const response = await api.post('/schedules', scheduleData);
+      
+      console.log('Schedule created response:', response.data);
+      
+      if (!response.data || !response.data.scheduleId) {
+        throw new Error('Failed to get schedule ID from server response');
+      }
+      
+      const scheduleId = response.data.scheduleId;
+      
+      try {
+        // Generate shifts automatically using the algorithm
+        console.log('Generating shifts for schedule:', scheduleId);
+        const generateResponse = await api.post(`/schedules/${scheduleId}/generate`);
+        console.log('Generate shifts response:', generateResponse.data);
+        
+        // Navigate to the schedule view
+        navigate(`/manager/schedule/${scheduleId}`);
+      } catch (genError) {
+        console.error("Error generating shifts:", genError);
+        
+        // Check if we can still navigate to the schedule
+        if (scheduleId) {
+          setError(`Schedule created, but auto-assignment failed: ${genError.response?.data?.error?.message || genError.message}. You can assign shifts manually.`);
+          navigate(`/manager/schedule/${scheduleId}`);
+        } else {
+          setError(`Failed to auto-generate schedule: ${genError.response?.data?.error?.message || genError.message}`);
+        }
+      }
+    } catch (err) {
+      console.error('Auto-generate schedule error:', err);
+      setError(`Failed to create schedule: ${err.response?.data?.error?.message || err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-// Then in your component's render section, add the auto-generate button:
-<div className="flex items-center">
-  <input
-    type="date"
-    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-    value={format(selectedWeek, 'yyyy-MM-dd')}
-    onChange={handleWeekChange}
-  />
-  <button
-    className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-    onClick={openScheduleModal}
-    disabled={loading}
-  >
-    {loading ? 'Түр хүлээнэ үү...' : 'Хуваарь үүсгэх'}
-  </button>
-  <button
-    className="ml-4 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-    onClick={handleAutoGenerateSchedule}
-    disabled={loading}
-  >
-    Автоматаар үүсгэх
-  </button>
-</div>
-
-
+  // Function to delete a schedule
+  const handleDeleteSchedule = async (scheduleId) => {
+    try {
+      setDeletingId(scheduleId);
+      setError('');
+      
+      await api.delete(`/schedules/${scheduleId}`);
+      
+      // Refresh the schedules list
+      const schedulesResponse = await api.get(`/schedules/branch/${branchId}`);
+      setSchedules(schedulesResponse.data);
+      
+      // Show success message
+      alert('Хуваарь амжилттай устгагдлаа.');
+    } catch (err) {
+      console.error('Delete schedule error:', err);
+      setError(`Failed to delete schedule: ${err.response?.data?.error?.message || err.message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const openScheduleModal = () => {
     setIsModalOpen(true);
@@ -233,6 +302,13 @@ const handleAutoGenerateSchedule = async () => {
           >
             {loading ? 'Түр хүлээнэ үү...' : 'Хуваарь үүсгэх'}
           </button>
+          <button
+            className="ml-4 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+            onClick={handleAutoGenerateSchedule}
+            disabled={loading}
+          >
+            Автоматаар үүсгэх
+          </button>
         </div>
       </div>
       
@@ -271,7 +347,19 @@ const handleAutoGenerateSchedule = async () => {
                 <p className="text-sm text-gray-500 mt-2">
                   {schedule.shift_count || 0} ээлж
                 </p>
-                <div className="mt-4 text-right">
+                <div className="mt-4 flex justify-between items-center">
+                  <button 
+                    className="text-red-600 hover:text-red-800 text-sm font-semibold"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm('Энэ хуваарийг устгах уу?')) {
+                        handleDeleteSchedule(schedule.id);
+                      }
+                    }}
+                    disabled={deletingId === schedule.id}
+                  >
+                    {deletingId === schedule.id ? 'Устгаж байна...' : 'Устгах'}
+                  </button>
                   <button 
                     className="text-blue-600 hover:text-blue-800 text-sm font-semibold"
                     onClick={(e) => {
@@ -342,7 +430,6 @@ const handleAutoGenerateSchedule = async () => {
                     onChange={handleModalInputChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="Сонгох">Сонгох</option>
                     <option value="07:00">07:00</option>
                     <option value="08:00">08:00</option>
                     <option value="09:00">09:00</option>
@@ -360,11 +447,11 @@ const handleAutoGenerateSchedule = async () => {
                     onChange={handleModalInputChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   >
-                    <option value="Сонгох">Сонгох</option>
                     <option value="15:00">15:00</option>
                     <option value="16:00">16:00</option>
                     <option value="17:00">17:00</option>
                     <option value="18:00">18:00</option>
+                    <option value="23:00">23:00</option>
                   </select>
                 </div>
               </div>
@@ -379,7 +466,6 @@ const handleAutoGenerateSchedule = async () => {
                   onChange={handleModalInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="Сонгох">Сонгох</option>
                   <option value="4">4 цаг</option>
                   <option value="6">6 цаг</option>
                   <option value="8">8 цаг</option>
@@ -396,7 +482,6 @@ const handleAutoGenerateSchedule = async () => {
                   onChange={handleModalInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="Сонгох">Сонгох</option>
                   <option value="3">3 өдөр</option>
                   <option value="4">4 өдөр</option>
                   <option value="5">5 өдөр</option>
@@ -413,7 +498,6 @@ const handleAutoGenerateSchedule = async () => {
                   onChange={handleModalInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="Сонгох">Сонгох</option>
                   <option value="1">1 өдөр</option>
                   <option value="2">2 өдөр</option>
                   <option value="3">3 өдөр</option>
