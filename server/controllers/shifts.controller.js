@@ -65,7 +65,7 @@ exports.getShiftsByEmployee = async (req, res, next) => {
  */
 exports.createShift = async (req, res, next) => {
   try {
-    const { scheduleId, employeeId, startTime, endTime, status = 'Pending' } = req.body;
+    let { scheduleId, employeeId, startTime, endTime, status = 'Approved' } = req.body;
     
     // Validate input
     if (!scheduleId || !employeeId || !startTime || !endTime) {
@@ -74,30 +74,32 @@ exports.createShift = async (req, res, next) => {
       });
     }
     
-    // Check if employee belongs to the branch
-    const employeeCheck = await pool.query(
-      `SELECT e.id FROM employees e
-       JOIN schedules s ON e.branch_id = s.branch_id
-       WHERE e.id = $1 AND s.id = $2`,
-      [employeeId, scheduleId]
-    );
+    // Log the received times
+    console.log('Received start time:', startTime);
+    console.log('Received end time:', endTime);
     
-    if (employeeCheck.rows.length === 0) {
-      return res.status(400).json({
-        error: { message: 'Employee does not belong to this branch' }
-      });
-    }
+    // Parse the times
+    const startDateTime = new Date(startTime);
+    const endDateTime = new Date(endTime);
     
-    // Create shift
+    // Adjust for 8 hour difference if needed
+    startDateTime.setHours(startDateTime.getHours() + 8);
+    endDateTime.setHours(endDateTime.getHours() + 8);
+    
+    console.log('Adjusted start time:', startDateTime.toISOString());
+    console.log('Adjusted end time:', endDateTime.toISOString());
+    
+    // Create shift with adjusted times
     const result = await pool.query(
       `INSERT INTO shifts (schedule_id, employee_id, start_time, end_time, status)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [scheduleId, employeeId, startTime, endTime, status]
+      [scheduleId, employeeId, startDateTime.toISOString(), endDateTime.toISOString(), status]
     );
     
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    console.error('Error creating shift:', error);
     next(error);
   }
 };

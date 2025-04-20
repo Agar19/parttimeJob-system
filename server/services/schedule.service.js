@@ -7,7 +7,7 @@ class ScheduleService {
   /**
    * Create a new schedule for a branch and week
    */
-  async createSchedule(branchId, weekStart) {
+  async createSchedule(branchId, weekStart, skipGeneration = false) {
     const client = await pool.connect();
     
     try {
@@ -25,7 +25,7 @@ class ScheduleService {
       
       await client.query('COMMIT');
       
-      return { scheduleId };
+      return { scheduleId, skipGeneration };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -105,10 +105,11 @@ class ScheduleService {
       // Get scheduling parameters with fallbacks for missing values
       const startTime = scheduleWithSettings.start_time ? scheduleWithSettings.start_time.substring(0, 5) : '07:00';
       const endTime = scheduleWithSettings.end_time ? scheduleWithSettings.end_time.substring(0, 5) : '23:00';
-      const minGapBetweenShifts = parseInt(scheduleWithSettings.min_gap_between_shifts) || 0;
+      const minGapBetweenShifts = parseInt(scheduleWithSettings.min_gap_between_shifts) || 8;
       const minShiftsPerEmployee = parseInt(scheduleWithSettings.min_shifts_per_employee) || 1;
-      const maxShiftsPerEmployee = parseInt(scheduleWithSettings.max_shifts_per_employee) || 40;
-      const shiftLength = 1; // Default shift length in hours
+      const maxShiftsPerEmployee = parseInt(scheduleWithSettings.max_shifts_per_employee) || 5;
+      const minShiftLength = 4; // Minimum shift length in hours
+      const maxShiftLength = 8; // Maximum shift length in hours
       
       console.log('Scheduling parameters:', {
         startTime,
@@ -116,7 +117,8 @@ class ScheduleService {
         minGapBetweenShifts,
         minShiftsPerEmployee,
         maxShiftsPerEmployee,
-        shiftLength
+        minShiftLength,
+        maxShiftLength
       });
       
       // Get all employees for the branch
@@ -211,11 +213,16 @@ class ScheduleService {
       const startHour = parseInt(startTime.split(':')[0]);
       const endHour = parseInt(endTime.split(':')[0]);
       
-      // Create shifts with specified shift length
-      for (let hour = startHour; hour <= endHour - shiftLength; hour += shiftLength) {
-        const shiftStart = `${hour.toString().padStart(2, '0')}:00`;
-        const shiftEnd = `${(hour + shiftLength).toString().padStart(2, '0')}:00`;
-        shiftTimes.push({ start: shiftStart, end: shiftEnd });
+      // Create shifts with reduced options to prevent overcrowding
+      // Focus on common shift lengths (4, 6, 8 hours) and starting every 2 hours
+      for (let hour = startHour; hour <= endHour - minShiftLength; hour += 2) {
+        for (let length = minShiftLength; length <= maxShiftLength; length += 2) {
+          if (hour + length <= endHour) {
+            const shiftStart = `${hour.toString().padStart(2, '0')}:00`;
+            const shiftEnd = `${(hour + length).toString().padStart(2, '0')}:00`;
+            shiftTimes.push({ start: shiftStart, end: shiftEnd });
+          }
+        }
       }
       
       console.log(`Created ${shiftTimes.length} different shift time slots:`, shiftTimes);
@@ -237,71 +244,41 @@ class ScheduleService {
       
       console.log(`Created ${shiftSlots.length} total shift slots`);
       
-      // Debug: Show first few shift slots
-      shiftSlots.slice(0, 3).forEach((slot, i) => {
-        console.log(`Shift slot ${i}: day=${slot.day}, time=${slot.startTime}-${slot.endTime}, date=${slot.date}`);
-      });
-      
-      // Check if we have employees available for each shift
-      const availabilityCheck = [];
-      
-      for (const shift of shiftSlots) {
-        const availableEmployees = [];
+      // Helper function to check if an employee is available for a shift
+      const isEmployeeAvailableForShift = (employee, shift, employeeAvailability) => {
+        const availability = employeeAvailability[employee.id] || [];
+        const daySlots = availability.filter(slot => slot.dayOfWeek === shift.day);
         
-        for (const emp of employees) {
-          const empId = emp.id;
-          const availability = employeeAvailability[empId] || [];
+        if (daySlots.length === 0) return false;
+        
+        const shiftStartHour = parseInt(shift.startTime.split(':')[0]);
+        const shiftEndHour = parseInt(shift.endTime.split(':')[0]);
+        
+        // Check each hour of the shift
+        for (let hour = shiftStartHour; hour < shiftEndHour; hour++) {
+          const hourString = `${hour.toString().padStart(2, '0')}:00`;
+          const nextHourString = `${(hour + 1).toString().padStart(2, '0')}:00`;
           
-          // Check if employee is available for this shift
-          // Modified approach: Check if all hours of the shift are covered by availability slots
-          // For an 8-hour shift, we don't need one slot covering the whole duration,
-          // just enough slots to cover each hour
+          const isHourCovered = daySlots.some(slot => 
+            slot.startTime <= hourString && slot.endTime >= nextHourString
+          );
           
-          // Get all availability slots for this day
-          const daySlots = availability.filter(slot => slot.dayOfWeek === shift.day);
-          
-          if (daySlots.length === 0) {
-            continue; // No availability for this day at all
-          }
-          
-          // Convert shift start/end to hours for checking
-          const shiftStartHour = parseInt(shift.startTime.split(':')[0]);
-          const shiftEndHour = parseInt(shift.endTime.split(':')[0]);
-          
-          // Check if each hour of the shift is covered by at least one availability slot
-          let allHoursCovered = true;
-          for (let hour = shiftStartHour; hour < shiftEndHour; hour++) {
-            const hourString = `${hour.toString().padStart(2, '0')}:00`;
-            const nextHourString = `${(hour + 1).toString().padStart(2, '0')}:00`;
-            
-            // Check if any availability slot covers this hour
-            const isHourCovered = daySlots.some(slot => 
-              slot.startTime <= hourString && slot.endTime >= nextHourString
-            );
-            
-            if (!isHourCovered) {
-              allHoursCovered = false;
-              break; // This hour is not covered by any availability slot
-            }
-          }
-          
-          if (allHoursCovered) {
-            availableEmployees.push(emp.name);
-          }
+          if (!isHourCovered) return false;
         }
         
-        availabilityCheck.push({
-          day: shift.day,
-          time: `${shift.startTime}-${shift.endTime}`,
-          availableEmployees: availableEmployees
-        });
+        return true;
+      };
+      
+      // Count available employees for each shift for better prioritization
+      const shiftAvailableEmployees = {};
+      for (const shift of shiftSlots) {
+        const availableCount = employees.filter(emp => isEmployeeAvailableForShift(emp, shift, employeeAvailability)).length;
+        shiftAvailableEmployees[`${shift.day}-${shift.startTime}-${shift.endTime}`] = availableCount;
       }
       
-      console.log('Availability check (first 3 shifts):', availabilityCheck.slice(0, 3));
-      
-      // Apply the greedy algorithm to assign shifts
-      console.log('Starting greedy shift assignment...');
-      const assignments = this._greedyShiftAssignment(
+      // Apply enhanced greedy algorithm with prioritization
+      console.log('Starting enhanced greedy shift assignment...');
+      const assignments = this._enhancedGreedyShiftAssignment(
         employees, 
         employeeAvailability, 
         shiftSlots,
@@ -309,15 +286,12 @@ class ScheduleService {
           minGapBetweenShifts,
           minShiftsPerEmployee,
           maxShiftsPerEmployee
-        }
+        },
+        shiftAvailableEmployees,
+        isEmployeeAvailableForShift
       );
       
       console.log(`Assigned ${assignments.length} shifts to employees`);
-      
-      // Debug: Show first few assignments
-      assignments.slice(0, 3).forEach((assignment, i) => {
-        console.log(`Assignment ${i}: employee=${assignment.employeeId}, day=${assignment.day}, time=${assignment.startTime}-${assignment.endTime}`);
-      });
       
       // Apply backtracking to optimize and resolve conflicts
       console.log('Starting backtracking optimization...');
@@ -436,12 +410,11 @@ class ScheduleService {
   }
   
   /**
-   * Greedy algorithm for initial shift assignments
-   * Assigns shifts to employees with the least number of current assignments
-   * who are available for that shift
+   * Enhanced greedy algorithm for initial shift assignments
+   * Prioritizes hard-to-fill shifts first and prevents overlapping assignments
    */
-  _greedyShiftAssignment(employees, employeeAvailability, shiftSlots, constraints) {
-    console.log('Starting greedy algorithm with:', { 
+  _enhancedGreedyShiftAssignment(employees, employeeAvailability, shiftSlots, constraints, shiftAvailableEmployees, isEmployeeAvailableForShift) {
+    console.log('Starting enhanced greedy algorithm with prioritization:', { 
       employeeCount: employees.length,
       shiftSlotCount: shiftSlots.length,
       constraints
@@ -455,51 +428,67 @@ class ScheduleService {
       employeeShiftCounts[emp.id] = 0;
     });
     
-    // Sort shift slots by day and start time
+    // Sort shift slots by difficulty to fill (fewer available employees first)
+    // and then by day and time
     const sortedShiftSlots = [...shiftSlots].sort((a, b) => {
-      // First sort by day
+      const keyA = `${a.day}-${a.startTime}-${a.endTime}`;
+      const keyB = `${b.day}-${b.startTime}-${b.endTime}`;
+      
+      // First sort by number of available employees (ascending)
+      const availableA = shiftAvailableEmployees[keyA] || 0;
+      const availableB = shiftAvailableEmployees[keyB] || 0;
+      
+      if (availableA !== availableB) {
+        return availableA - availableB; // Prioritize shifts with fewer available employees
+      }
+      
+      // Then by shift length (descending, prefer longer shifts)
+      const lengthA = parseInt(a.endTime) - parseInt(a.startTime);
+      const lengthB = parseInt(b.endTime) - parseInt(b.startTime);
+      if (lengthA !== lengthB) {
+        return lengthB - lengthA; // Longer shifts first
+      }
+      
+      // Finally by day and start time
       if (a.day !== b.day) return a.day - b.day;
-      // Then by start time
       return a.startTime.localeCompare(b.startTime);
+    });
+    
+    // Track assigned shifts by employee and day to prevent overlaps
+    const employeeAssignedShifts = {};
+    employees.forEach(emp => {
+      employeeAssignedShifts[emp.id] = {};
+      for (let day = 0; day < 7; day++) {
+        employeeAssignedShifts[emp.id][day] = [];
+      }
     });
     
     // Assign each shift
     for (const shift of sortedShiftSlots) {
       // Find available employees for this shift
       const availableEmployees = employees.filter(emp => {
-        const availability = employeeAvailability[emp.id] || [];
-        
-        // Get all availability slots for this day
-        const daySlots = availability.filter(slot => slot.dayOfWeek === shift.day);
-        
-        if (daySlots.length === 0) {
-          return false; // No availability for this day at all
+        // Check if employee is available based on their schedule
+        if (!isEmployeeAvailableForShift(emp, shift, employeeAvailability)) {
+          return false;
         }
         
-        // Convert shift start/end to hours for checking
-        const shiftStartHour = parseInt(shift.startTime.split(':')[0]);
-        const shiftEndHour = parseInt(shift.endTime.split(':')[0]);
-        
-        // Check if each hour of the shift is covered by at least one availability slot
-        for (let hour = shiftStartHour; hour < shiftEndHour; hour++) {
-          const hourString = `${hour.toString().padStart(2, '0')}:00`;
-          const nextHourString = `${(hour + 1).toString().padStart(2, '0')}:00`;
+        // Check for overlapping shifts on the same day
+        const assignedShiftsOnDay = employeeAssignedShifts[emp.id][shift.day] || [];
+        const hasOverlap = assignedShiftsOnDay.some(assigned => {
+          const assignedStart = parseInt(assigned.startTime.split(':')[0]);
+          const assignedEnd = parseInt(assigned.endTime.split(':')[0]);
+          const shiftStart = parseInt(shift.startTime.split(':')[0]);
+          const shiftEnd = parseInt(shift.endTime.split(':')[0]);
           
-          // Check if any availability slot covers this hour
-          const isHourCovered = daySlots.some(slot => 
-            slot.startTime <= hourString && slot.endTime >= nextHourString
-          );
-          
-          if (!isHourCovered) {
-            return false; // This hour is not covered by any availability slot
-          }
-        }
+          // Check for any overlap
+          return (shiftStart < assignedEnd && shiftEnd > assignedStart);
+        });
         
-        // If we got here, all hours are covered
-        return true;
+        return !hasOverlap;
       });
       
-      console.log(`Shift day=${shift.day} time=${shift.startTime}-${shift.endTime}: ${availableEmployees.length} available employees`);
+      const shiftKey = `${shift.day}-${shift.startTime}-${shift.endTime}`;
+      console.log(`Shift ${shiftKey}: ${availableEmployees.length} available employees`);
       
       if (availableEmployees.length > 0) {
         // Filter employees who haven't exceeded their max shifts
@@ -508,14 +497,38 @@ class ScheduleService {
         );
         
         if (eligibleEmployees.length > 0) {
-          // Sort employees by current shift count (ascending)
-          eligibleEmployees.sort((a, b) => 
-            employeeShiftCounts[a.id] - employeeShiftCounts[b.id]
+          // First, sort employees who haven't reached minimum shifts
+          const underutilizedEmployees = eligibleEmployees.filter(emp => 
+            employeeShiftCounts[emp.id] < constraints.minShiftsPerEmployee
           );
           
-          // Assign to employee with fewest shifts
-          const assignedEmployee = eligibleEmployees[0];
+          // Pick from underutilized employees if any exist, otherwise from all eligible employees
+          const candidateEmployees = underutilizedEmployees.length > 0 ? underutilizedEmployees : eligibleEmployees;
+          
+          // Then sort by current shift count (ascending)
+          candidateEmployees.sort((a, b) => {
+            // First by total shift count
+            const countDiff = employeeShiftCounts[a.id] - employeeShiftCounts[b.id];
+            if (countDiff !== 0) return countDiff;
+            
+            // Then by shifts on this specific day
+            const aShiftsOnDay = (employeeAssignedShifts[a.id][shift.day] || []).length;
+            const bShiftsOnDay = (employeeAssignedShifts[b.id][shift.day] || []).length;
+            return aShiftsOnDay - bShiftsOnDay;
+          });
+          
+          // Assign to best employee
+          const assignedEmployee = candidateEmployees[0];
           employeeShiftCounts[assignedEmployee.id]++;
+          
+          // Track this assignment to prevent overlaps
+          if (!employeeAssignedShifts[assignedEmployee.id][shift.day]) {
+            employeeAssignedShifts[assignedEmployee.id][shift.day] = [];
+          }
+          employeeAssignedShifts[assignedEmployee.id][shift.day].push({
+            startTime: shift.startTime,
+            endTime: shift.endTime
+          });
           
           // Debug info
           console.log(`Assigned to ${assignedEmployee.name} (now has ${employeeShiftCounts[assignedEmployee.id]} shifts)`);
@@ -531,11 +544,23 @@ class ScheduleService {
           console.log(`No eligible employees (all exceeded max shifts)`);
         }
       } else {
-        console.log(`No available employees for this shift!`);
+        console.log(`No available non-overlapping employees for this shift!`);
       }
     }
     
-    console.log(`Greedy algorithm assigned ${assignments.length} shifts`);
+    console.log(`Enhanced greedy algorithm assigned ${assignments.length} shifts out of ${shiftSlots.length} possible slots`);
+    
+    // Log the coverage percentage
+    const coveragePercentage = (assignments.length / shiftSlots.length) * 100;
+    console.log(`Schedule coverage: ${coveragePercentage.toFixed(2)}%`);
+    
+    // Log employee shift distribution
+    console.log('Shift distribution:');
+    for (const emp of employees) {
+      const shiftCount = employeeShiftCounts[emp.id] || 0;
+      console.log(`- ${emp.name}: ${shiftCount} shifts`);
+    }
+    
     return assignments;
   }
   
@@ -620,6 +645,36 @@ class ScheduleService {
         }
       }
       
+      // Check for overlapping shifts
+      for (const empId in employeeAssignments) {
+        const shifts = employeeAssignments[empId];
+        
+        // Check each pair of shifts for this employee
+        for (let i = 0; i < shifts.length; i++) {
+          for (let j = i + 1; j < shifts.length; j++) {
+            const shift1 = shifts[i];
+            const shift2 = shifts[j];
+            
+            // Only check shifts on the same day
+            if (shift1.day !== shift2.day) continue;
+            
+            const start1 = parseInt(shift1.startTime.split(':')[0]);
+            const end1 = parseInt(shift1.endTime.split(':')[0]);
+            const start2 = parseInt(shift2.startTime.split(':')[0]);
+            const end2 = parseInt(shift2.endTime.split(':')[0]);
+            
+            // Check for overlap
+            if (start1 < end2 && end1 > start2) {
+              violations.push({
+                type: 'shiftOverlap',
+                employeeId: empId,
+                shifts: [shift1, shift2]
+              });
+            }
+          }
+        }
+      }
+      
       return violations;
     };
     
@@ -648,6 +703,55 @@ class ScheduleService {
       
       let modifiedAssignments = [...assignments];
       
+      // Handle overlap violations first as they're critical
+      const overlapViolations = violations.filter(v => v.type === 'shiftOverlap');
+      if (overlapViolations.length > 0) {
+        console.log(`Processing ${overlapViolations.length} shift overlap violations`);
+        
+        for (const violation of overlapViolations) {
+          // Choose the second shift to reassign
+          const shiftToReassign = violation.shifts[1];
+          
+          // Find alternative employee
+          const alternativeEmployeeId = this._findAlternativeEmployee(
+            shiftToReassign,
+            employees,
+            employeeAvailability,
+            modifiedAssignments,
+            constraints
+          );
+          
+          if (alternativeEmployeeId) {
+            const employee = employees.find(e => e.id === violation.employeeId);
+            const altEmployee = employees.find(e => e.id === alternativeEmployeeId);
+            console.log(`Resolving overlap by reassigning shift from ${employee?.name || violation.employeeId} to ${altEmployee?.name || alternativeEmployeeId}`);
+            
+            // Update the assignment
+            const assignmentIndex = modifiedAssignments.findIndex(
+              a => a.employeeId === shiftToReassign.employeeId && 
+                   a.day === shiftToReassign.day && 
+                   a.startTime === shiftToReassign.startTime
+            );
+            
+            if (assignmentIndex !== -1) {
+              modifiedAssignments[assignmentIndex] = {
+                ...modifiedAssignments[assignmentIndex],
+                employeeId: alternativeEmployeeId
+              };
+            }
+          } else {
+            console.log(`Could not find alternative employee for overlapping shift, removing it`);
+            
+            // If no alternative, remove the shift
+            modifiedAssignments = modifiedAssignments.filter(
+              a => !(a.employeeId === shiftToReassign.employeeId && 
+                    a.day === shiftToReassign.day && 
+                    a.startTime === shiftToReassign.startTime)
+            );
+          }
+        }
+      }
+      
       // Handle each type of violation
       // First handle max shifts exceeded
       const maxShiftsViolations = violations.filter(v => v.type === 'maxShiftsExceeded');
@@ -655,6 +759,7 @@ class ScheduleService {
         console.log(`Processing ${maxShiftsViolations.length} max shifts violations`);
         
         for (const violation of maxShiftsViolations) {
+          // Find the employee
           // Find the employee
           const employee = employees.find(e => e.id === violation.employeeId);
           console.log(`Employee ${employee?.name || violation.employeeId} has ${violation.count} shifts (exceeds max of ${constraints.maxShiftsPerEmployee})`);
@@ -755,6 +860,106 @@ class ScheduleService {
         }
       }
       
+      // Handle min shifts not met violations by trying to assign additional shifts
+      const minShiftsViolations = violations.filter(v => v.type === 'minShiftsNotMet');
+      if (minShiftsViolations.length > 0) {
+        console.log(`Processing ${minShiftsViolations.length} minimum shifts violations`);
+        
+        // For each employee who needs more shifts
+        for (const violation of minShiftsViolations) {
+          const employee = employees.find(e => e.id === violation.employeeId);
+          console.log(`Employee ${employee?.name || violation.employeeId} only has ${violation.count} shifts (below min of ${constraints.minShiftsPerEmployee})`);
+          
+          // Find shifts that could be reassigned to this employee
+          const candidateShifts = [];
+          
+          // Look through all shifts already assigned to other employees
+          const otherEmployeeShifts = modifiedAssignments.filter(a => a.employeeId !== violation.employeeId);
+          
+          for (const shift of otherEmployeeShifts) {
+            // Check if this employee is available for this shift
+            const isAvailable = this._isEmployeeAvailableForShift(employee, shift, employeeAvailability);
+            
+            if (isAvailable) {
+              // Check if assigning this shift would create overlaps
+              const wouldCreateOverlap = modifiedAssignments
+                .filter(a => a.employeeId === violation.employeeId && a.day === shift.day)
+                .some(existingShift => {
+                  const existingStart = parseInt(existingShift.startTime.split(':')[0]);
+                  const existingEnd = parseInt(existingShift.endTime.split(':')[0]);
+                  const shiftStart = parseInt(shift.startTime.split(':')[0]);
+                  const shiftEnd = parseInt(shift.endTime.split(':')[0]);
+                  
+                  return (shiftStart < existingEnd && shiftEnd > existingStart);
+                });
+              
+              if (!wouldCreateOverlap) {
+                // Check if it would violate rest time with any existing shifts
+                const wouldViolateRest = modifiedAssignments
+                  .filter(a => a.employeeId === violation.employeeId)
+                  .some(existingShift => {
+                    const hoursBetween = this._calculateHoursBetween(
+                      existingShift.day, existingShift.endTime,
+                      shift.day, shift.startTime
+                    );
+                    
+                    return hoursBetween < constraints.minGapBetweenShifts;
+                  });
+                
+                if (!wouldViolateRest) {
+                  candidateShifts.push(shift);
+                }
+              }
+            }
+          }
+          
+          // Sort candidate shifts by employee shift count (descending)
+          // to take shifts from employees who have the most
+          candidateShifts.sort((a, b) => {
+            const aCount = modifiedAssignments.filter(shift => shift.employeeId === a.employeeId).length;
+            const bCount = modifiedAssignments.filter(shift => shift.employeeId === b.employeeId).length;
+            return bCount - aCount;
+          });
+          
+          // Calculate how many more shifts are needed
+          const neededShifts = constraints.minShiftsPerEmployee - violation.count;
+          console.log(`Need to assign ${neededShifts} more shifts, found ${candidateShifts.length} candidates`);
+          
+          // Reassign shifts up to the needed amount
+          let reassignedCount = 0;
+          for (let i = 0; i < candidateShifts.length && reassignedCount < neededShifts; i++) {
+            const shiftToReassign = candidateShifts[i];
+            const originalEmployee = employees.find(e => e.id === shiftToReassign.employeeId);
+            
+            // Only reassign if the original employee won't go below minimum
+            const originalEmployeeShiftCount = modifiedAssignments.filter(
+              a => a.employeeId === shiftToReassign.employeeId
+            ).length;
+            
+            if (originalEmployeeShiftCount > constraints.minShiftsPerEmployee) {
+              console.log(`Reassigning shift from ${originalEmployee?.name || shiftToReassign.employeeId} to ${employee?.name || violation.employeeId}`);
+              
+              // Update the assignment
+              const assignmentIndex = modifiedAssignments.findIndex(
+                a => a.employeeId === shiftToReassign.employeeId && 
+                     a.day === shiftToReassign.day && 
+                     a.startTime === shiftToReassign.startTime
+              );
+              
+              if (assignmentIndex !== -1) {
+                modifiedAssignments[assignmentIndex] = {
+                  ...modifiedAssignments[assignmentIndex],
+                  employeeId: violation.employeeId
+                };
+                reassignedCount++;
+              }
+            }
+          }
+          
+          console.log(`Successfully reassigned ${reassignedCount} of ${neededShifts} needed shifts`);
+        }
+      }
+      
       // Recursively continue resolving violations
       return resolveViolations(modifiedAssignments, depth + 1, maxDepth);
     };
@@ -771,6 +976,33 @@ class ScheduleService {
   }
   
   /**
+   * Helper method to check if an employee is available for a shift
+   */
+  _isEmployeeAvailableForShift(employee, shift, employeeAvailability) {
+    const availability = employeeAvailability[employee.id] || [];
+    const daySlots = availability.filter(slot => slot.dayOfWeek === shift.day);
+    
+    if (daySlots.length === 0) return false;
+    
+    const shiftStartHour = parseInt(shift.startTime.split(':')[0]);
+    const shiftEndHour = parseInt(shift.endTime.split(':')[0]);
+    
+    // Check each hour of the shift
+    for (let hour = shiftStartHour; hour < shiftEndHour; hour++) {
+      const hourString = `${hour.toString().padStart(2, '0')}:00`;
+      const nextHourString = `${(hour + 1).toString().padStart(2, '0')}:00`;
+      
+      const isHourCovered = daySlots.some(slot => 
+        slot.startTime <= hourString && slot.endTime >= nextHourString
+      );
+      
+      if (!isHourCovered) return false;
+    }
+    
+    return true;
+  }
+  
+  /**
    * Find an alternative employee to assign to a shift
    */
   _findAlternativeEmployee(shift, employees, employeeAvailability, currentAssignments, constraints) {
@@ -781,35 +1013,28 @@ class ScheduleService {
       // Skip the current employee
       if (emp.id === shift.employeeId) return false;
       
-      // Check if employee is available for this shift using the hourly approach
-      const availability = employeeAvailability[emp.id] || [];
-      
-      // Get all availability slots for this day
-      const daySlots = availability.filter(slot => slot.dayOfWeek === shift.day);
-      
-      if (daySlots.length === 0) {
-        console.log(`Employee ${emp.name} (${emp.id}) has no availability on day ${shift.day}`);
+      // Check if employee is available based on their availability
+      if (!this._isEmployeeAvailableForShift(emp, shift, employeeAvailability)) {
         return false;
       }
       
-      // Convert shift start/end to hours for checking
-      const shiftStartHour = parseInt(shift.startTime.split(':')[0]);
-      const shiftEndHour = parseInt(shift.endTime.split(':')[0]);
+      // Check for overlapping shifts on the same day
+      const existingShiftsOnDay = currentAssignments.filter(
+        a => a.employeeId === emp.id && a.day === shift.day
+      );
       
-      // Check if each hour of the shift is covered by at least one availability slot
-      for (let hour = shiftStartHour; hour < shiftEndHour; hour++) {
-        const hourString = `${hour.toString().padStart(2, '0')}:00`;
-        const nextHourString = `${(hour + 1).toString().padStart(2, '0')}:00`;
+      const hasOverlap = existingShiftsOnDay.some(existingShift => {
+        const existingStart = parseInt(existingShift.startTime.split(':')[0]);
+        const existingEnd = parseInt(existingShift.endTime.split(':')[0]);
+        const newStart = parseInt(shift.startTime.split(':')[0]);
+        const newEnd = parseInt(shift.endTime.split(':')[0]);
         
-        // Check if any availability slot covers this hour
-        const isHourCovered = daySlots.some(slot => 
-          slot.startTime <= hourString && slot.endTime >= nextHourString
-        );
-        
-        if (!isHourCovered) {
-          console.log(`Employee ${emp.name} (${emp.id}) is not available at hour ${hourString} on day ${shift.day}`);
-          return false;
-        }
+        // Check for overlap
+        return (newStart < existingEnd && newEnd > existingStart);
+      });
+      
+      if (hasOverlap) {
+        return false;
       }
       
       // Check if reassignment would violate constraints
@@ -820,7 +1045,6 @@ class ScheduleService {
       
       // Check max shifts constraint
       if (employeeShiftCount >= constraints.maxShiftsPerEmployee) {
-        console.log(`Employee ${emp.name} (${emp.id}) already has maximum shifts (${employeeShiftCount})`);
         return false;
       }
       
@@ -847,7 +1071,6 @@ class ScheduleService {
             );
           } else {
             // Shifts overlap - cannot assign
-            console.log(`Employee ${emp.name} (${emp.id}) has an overlapping shift on day ${assignment.day}`);
             return false;
           }
         } else if (assignment.day < shift.day) {
@@ -865,12 +1088,10 @@ class ScheduleService {
         }
         
         if (hoursBetween < constraints.minGapBetweenShifts) {
-          console.log(`Employee ${emp.name} (${emp.id}) doesn't have enough rest time between shifts (${hoursBetween} hours, min is ${constraints.minGapBetweenShifts})`);
           return false;
         }
       }
       
-      console.log(`Employee ${emp.name} (${emp.id}) is eligible for this shift`);
       return true;
     });
     
@@ -887,7 +1108,24 @@ class ScheduleService {
       ).length;
     });
     
-    // Sort by shift count (ascending)
+    // First try employees who haven't reached minimum shifts
+    const underutilizedEmployees = availableEmployees.filter(emp => 
+      employeeShiftCounts[emp.id] < constraints.minShiftsPerEmployee
+    );
+    
+    // If we have underutilized employees, prefer them
+    if (underutilizedEmployees.length > 0) {
+      // Sort by shift count (ascending)
+      underutilizedEmployees.sort((a, b) => 
+        employeeShiftCounts[a.id] - employeeShiftCounts[b.id]
+      );
+      
+      const chosenEmployee = underutilizedEmployees[0];
+      console.log(`Selected underutilized employee: ${chosenEmployee.name} (${chosenEmployee.id}) with ${employeeShiftCounts[chosenEmployee.id]} shifts`);
+      return chosenEmployee.id;
+    }
+    
+    // Otherwise sort all available employees by shift count (ascending)
     availableEmployees.sort((a, b) => 
       employeeShiftCounts[a.id] - employeeShiftCounts[b.id]
     );
@@ -922,7 +1160,6 @@ class ScheduleService {
       hoursBetween = (24 * (day2 - day1)) + (hours2 - hours1);
     }
     
-    console.log(`Hours between day${day1} ${time1} and day${day2} ${time2}: ${hoursBetween}`);
     return hoursBetween;
   }
   
@@ -1100,23 +1337,36 @@ class ScheduleService {
       }
     }
     
-    // Add shifts to the formatted structure
-    shifts.forEach(shift => {
-      const startTime = new Date(shift.start_time);
-      const dateString = startTime.toISOString().split('T')[0];
-      const timeString = `${String(startTime.getHours()).padStart(2, '0')}:00`;
+    // Add shifts to the formatted structure - revised version
+shifts.forEach(shift => {
+  const startTime = new Date(shift.start_time);
+  const endTime = new Date(shift.end_time);
+  const dateString = startTime.toISOString().split('T')[0];
+  
+  // Get all hours this shift spans
+  const startHour = startTime.getHours();
+  const endHour = endTime.getHours();
+  
+  // Add the shift to each hour's array that it spans
+  for (let hour = startHour; hour <= endHour; hour++) {
+    const timeString = `${String(hour).padStart(2, '0')}:00`;
+    
+    if (formattedShifts[dateString] && formattedShifts[dateString][timeString]) {
+      // Add a flag to indicate this is a continuation of a shift
+      const isContinuation = hour > startHour;
       
-      if (formattedShifts[dateString] && formattedShifts[dateString][timeString]) {
-        formattedShifts[dateString][timeString].push({
-          id: shift.id,
-          employeeId: shift.employee_id,
-          employeeName: shift.employee_name,
-          startTime: shift.start_time,
-          endTime: shift.end_time,
-          status: shift.status
-        });
-      }
-    });
+      formattedShifts[dateString][timeString].push({
+        id: shift.id,
+        employeeId: shift.employee_id,
+        employeeName: shift.employee_name,
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        status: shift.status,
+        isContinuation // Optional flag that your frontend could use
+      });
+    }
+  }
+});
     
     return {
       id: schedule.id,
@@ -1174,4 +1424,5 @@ class ScheduleService {
     return result.rows[0];
   }
 }
+
 module.exports = new ScheduleService();

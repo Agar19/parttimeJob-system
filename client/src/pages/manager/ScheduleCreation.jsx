@@ -59,97 +59,7 @@ const ScheduleCreation = () => {
     fetchData();
   }, [branchId]);
 
-  const handleCreateSchedule = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Format date for API
-      const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
-      
-      // Extract selected days as array of day indices
-      const selectedDaysArray = Object.keys(modalData.selectedDays)
-        .filter(day => modalData.selectedDays[day])
-        .map(day => parseInt(day));
-      
-      console.log("Creating schedule with the following parameters:");
-      console.log("Branch ID:", branchId);
-      console.log("Week Start:", formattedDate);
-      console.log("Selected Days:", selectedDaysArray);
-      console.log("Shift Time Range:", `${modalData.startTime} - ${modalData.endTime}`);
-      console.log("Min Gap Between Shifts:", modalData.minGapBetweenShifts);
-      console.log("Min Shifts Per Employee:", modalData.minShiftsPerEmployee);
-      console.log("Max Shifts Per Employee:", modalData.maxShiftsPerEmployee);
-      
-      // Create schedule with enhanced data
-      const response = await api.post('/schedules', {
-        branchId,
-        weekStart: formattedDate,
-        scheduleName: modalData.scheduleName || 'New Schedule',
-        selectedDays: selectedDaysArray,
-        startTime: modalData.startTime,
-        endTime: modalData.endTime,
-        minGapBetweenShifts: modalData.minGapBetweenShifts,
-        minShiftsPerEmployee: modalData.minShiftsPerEmployee,
-        maxShiftsPerEmployee: modalData.maxShiftsPerEmployee,
-        additionalNotes: modalData.additionalNotes
-      });
-      
-      console.log("Schedule created successfully:", response.data);
-      
-      // Generate shifts automatically using the algorithm
-      if (response.data && response.data.scheduleId) {
-        const scheduleId = response.data.scheduleId;
-        console.log("Generating shifts for schedule ID:", scheduleId);
-        
-        try {
-          const generateResponse = await api.post(`/schedules/${scheduleId}/generate`);
-          console.log("Shifts generated successfully:", generateResponse.data);
-          
-          // Navigate to the schedule view
-          navigate(`/manager/schedule/${scheduleId}`);
-        } catch (genError) {
-          console.error("Error generating shifts:", genError);
-          setError(`Shifts created, but auto-assignment failed: ${genError.response?.data?.error?.message || genError.message}. You can assign shifts manually.`);
-          
-          // Still navigate to the schedule view so they can assign manually
-          navigate(`/manager/schedule/${scheduleId}`);
-        }
-      } else {
-        setError('Invalid response from server when creating schedule');
-      }
-    } catch (err) {
-      console.error('Create schedule error:', err);
-      setError(`Failed to create schedule: ${err.response?.data?.error?.message || err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleWeekChange = (e) => {
-    const date = new Date(e.target.value);
-    setSelectedWeek(startOfWeek(date));
-  };
-
-  const renderWeekDays = () => {
-    const days = [];
-    
-    for (let i = 0; i < 7; i++) {
-      const day = addDays(selectedWeek, i);
-      const formattedDate = format(day, 'yyyy-MM-dd');
-      
-      days.push(
-        <div key={i} className="text-center">
-          <div className="font-medium">{daysOfWeek[i]}</div>
-          <div className="text-sm text-gray-500">{format(day, 'dd')}</div>
-        </div>
-      );
-    }
-    
-    return days;
-  };
-
-  // Improved auto-generation function with robust error handling
+  // Auto-generated schedule with algorithm
   const handleAutoGenerateSchedule = async () => {
     try {
       setLoading(true);
@@ -176,7 +86,8 @@ const ScheduleCreation = () => {
         endTime: '23:00',
         minGapBetweenShifts: '8',  // 8 hours minimum between shifts
         minShiftsPerEmployee: '1', // At least 1 shift per employee
-        maxShiftsPerEmployee: '5'  // Maximum 5 shifts per employee
+        maxShiftsPerEmployee: '5',  // Maximum 5 shifts per employee
+        skipGeneration: false // Use auto-generation
       };
       
       console.log("Sending schedule data:", scheduleData);
@@ -216,6 +127,82 @@ const ScheduleCreation = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Manual schedule creation that doesn't call the generate endpoint
+  const handleCreateManualSchedule = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      // Format date for API
+      const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
+      
+      // Extract selected days as array of day indices
+      const selectedDaysArray = Object.keys(modalData.selectedDays)
+        .filter(day => modalData.selectedDays[day])
+        .map(day => parseInt(day));
+      
+      console.log("Creating manual schedule with the following parameters:");
+      console.log("Branch ID:", branchId);
+      console.log("Week Start:", formattedDate);
+      console.log("Selected Days:", selectedDaysArray);
+      console.log("Shift Time Range:", `${modalData.startTime} - ${modalData.endTime}`);
+      
+      // Create schedule without generating shifts
+      const response = await api.post('/schedules', {
+        branchId,
+        weekStart: formattedDate,
+        scheduleName: modalData.scheduleName || 'Manual Schedule',
+        selectedDays: selectedDaysArray,
+        startTime: modalData.startTime,
+        endTime: modalData.endTime,
+        minGapBetweenShifts: modalData.minGapBetweenShifts,
+        minShiftsPerEmployee: modalData.minShiftsPerEmployee,
+        maxShiftsPerEmployee: modalData.maxShiftsPerEmployee,
+        additionalNotes: modalData.additionalNotes,
+        skipGeneration: true // This is the key - explicit flag to skip auto-generation
+      });
+      
+      console.log("Manual schedule created successfully:", response.data);
+      
+      // Navigate directly to the schedule view without generating shifts
+      if (response.data && response.data.scheduleId) {
+        // Do NOT call generate endpoint for manual schedules
+        navigate(`/manager/schedule/${response.data.scheduleId}`);
+      } else {
+        setError('Invalid response from server when creating schedule');
+      }
+    } catch (err) {
+      console.error('Create manual schedule error:', err);
+      setError(`Failed to create schedule: ${err.response?.data?.error?.message || err.message}`);
+    } finally {
+      setLoading(false);
+      setIsModalOpen(false);
+    }
+  };
+
+  const handleWeekChange = (e) => {
+    const date = new Date(e.target.value);
+    setSelectedWeek(startOfWeek(date));
+  };
+
+  const renderWeekDays = () => {
+    const days = [];
+    
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(selectedWeek, i);
+      const formattedDate = format(day, 'yyyy-MM-dd');
+      
+      days.push(
+        <div key={i} className="text-center">
+          <div className="font-medium">{daysOfWeek[i]}</div>
+          <div className="text-sm text-gray-500">{format(day, 'dd')}</div>
+        </div>
+      );
+    }
+    
+    return days;
   };
 
   // Function to delete a schedule
@@ -526,7 +513,7 @@ const ScheduleCreation = () => {
                 </button>
                 <button
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                  onClick={handleCreateSchedule}
+                  onClick={handleCreateManualSchedule}
                 >
                   Үүсгэх
                 </button>
@@ -539,4 +526,4 @@ const ScheduleCreation = () => {
   );
 };
 
-export default ScheduleCreation;
+export default ScheduleCreation;  

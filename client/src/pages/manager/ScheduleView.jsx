@@ -8,6 +8,7 @@ const ScheduleView = () => {
   const navigate = useNavigate();
   
   const [schedule, setSchedule] = useState(null);
+  const [processedSchedule, setProcessedSchedule] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -31,12 +32,109 @@ const ScheduleView = () => {
     '19:00', '20:00', '21:00', '22:00', '23:00'
   ];
   
+  // Process the schedule data to fill in all time slots covered by each shift
+  const processScheduleData = (scheduleData) => {
+    //1 udur uragshlij baisan
+    console.log('Processing schedule data:', scheduleData);
+      if (scheduleData && scheduleData.shifts) {
+      Object.keys(scheduleData.shifts).forEach(dateStr => {
+       console.log('Date from server:', dateStr);
+       console.log('Parsed date:', parseISO(dateStr));
+     });
+    }
+
+    if (!scheduleData || !scheduleData.shifts) {
+      console.error('Invalid schedule data received:', scheduleData);
+      return null;
+    }
+    
+    // Clone the data to avoid modifying the original
+    const processedData = JSON.parse(JSON.stringify(scheduleData));
+    
+    // Ensure all date entries have all time slots
+    for (const dateStr in processedData.shifts) {
+      for (const timeSlot of timeSlots) {
+        if (!processedData.shifts[dateStr][timeSlot]) {
+          processedData.shifts[dateStr][timeSlot] = [];
+        }
+      }
+    }
+    
+    // For each date in the schedule
+    for (const dateStr in scheduleData.shifts) {
+      // For each time slot in that date
+      for (const timeStr in scheduleData.shifts[dateStr]) {
+        // For each shift starting at this time
+        const shiftsAtTime = scheduleData.shifts[dateStr][timeStr];
+        
+        if (shiftsAtTime && shiftsAtTime.length > 0) {
+          // Process each shift
+          shiftsAtTime.forEach(shift => {
+            const startTime = new Date(shift.startTime);
+            const endTime = new Date(shift.endTime);
+            
+            // Calculate hours this shift covers
+            let currentHour = startTime.getHours();
+            const endHour = endTime.getHours();
+            
+            // Add the shift to all subsequent time slots it covers
+            while (currentHour < endHour - 1) {
+              currentHour++;
+              const nextTimeStr = `${String(currentHour).padStart(2, '0')}:00`;
+              
+              // Skip if we're beyond our defined time slots
+              if (!timeSlots.includes(nextTimeStr)) continue;
+              
+              // Initialize the time slot array if needed
+              if (!processedData.shifts[dateStr][nextTimeStr]) {
+                processedData.shifts[dateStr][nextTimeStr] = [];
+              }
+              
+              // Add a reference to this shift with a continuation flag
+              const continuationShift = {
+                ...shift,
+                isContinuation: true,
+                originalStartTime: shift.startTime
+              };
+              
+              // Add to this time slot only if it doesn't already have this shift
+              const alreadyExists = processedData.shifts[dateStr][nextTimeStr].some(
+                existingShift => existingShift.id === shift.id
+              );
+              
+              if (!alreadyExists) {
+                processedData.shifts[dateStr][nextTimeStr].push(continuationShift);
+              }
+            }
+          });
+        }
+      }
+    }
+    
+    return processedData;
+  };
+  
   useEffect(() => {
     const fetchData = async () => {
       try {
         // Fetch schedule details
         const scheduleResponse = await api.get(`/schedules/${scheduleId}`);
+        
+        // Ensure we're using the correct week start date without time zone adjustments
+        let weekStart = scheduleResponse.data.weekStart;
+        // Fix the date by removing any time component and ensure it's treated as a local date
+        if (weekStart.includes('T')) {
+          weekStart = weekStart.split('T')[0];
+          scheduleResponse.data.weekStart = weekStart;
+        }
+        
+        console.log('Week start from server (fixed):', weekStart);
+        
         setSchedule(scheduleResponse.data);
+        
+        // Process the schedule data
+        const processed = processScheduleData(scheduleResponse.data);
+        setProcessedSchedule(processed);
         
         // Fetch employees for this branch
         const employeesResponse = await api.get(`/employees/branch/${scheduleResponse.data.branchId}`);
@@ -52,10 +150,34 @@ const ScheduleView = () => {
     fetchData();
   }, [scheduleId]);
   
+  // Function to refresh schedule data
+  const refreshScheduleData = async () => {
+    try {
+      setLoading(true);
+      // Fetch schedule details
+      const scheduleResponse = await api.get(`/schedules/${scheduleId}`);
+      console.log('Refreshed schedule data:', scheduleResponse.data);
+      setSchedule(scheduleResponse.data);
+      
+      // Process the schedule data to fill all time slots
+      const processed = processScheduleData(scheduleResponse.data);
+      setProcessedSchedule(processed);
+    } catch (err) {
+      setError('Failed to refresh schedule data');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   const handleAddShift = () => {
+    // Debug: log the days of week we're using
+    console.log('Days of week mapping:', daysOfWeek);
+    
+    // Initialize modal with first employee if available
     setModalData({
       employeeId: employees.length > 0 ? employees[0].id : '',
-      day: 0,
+      day: 0, // Monday if your daysOfWeek starts with Monday
       startTime: '07:00',
       endTime: '15:00'
     });
@@ -73,37 +195,70 @@ const ScheduleView = () => {
   
   const handleSaveShift = async () => {
     try {
+      setLoading(true);
       const { employeeId, day, startTime, endTime } = modalData;
       
-      // Calculate date from day of week
-      const shiftDate = addDays(parseISO(schedule.weekStart), day);
+      if (!employeeId) {
+        setError('Please select an employee');
+        setLoading(false);
+        return;
+      }
       
-      // Create start and end times
-      const startDateTime = new Date(shiftDate);
+      // Calculate date from day of week
+      const weekStartDate = parseISO(schedule.weekStart);
+      console.log('Week start date after parsing:', weekStartDate);
+      
+      const shiftDate = addDays(weekStartDate, Number(day));
+      console.log('Calculated shift date:', shiftDate);
+      
+      // Calculate timezone offset in minutes
+      const timezoneOffset = new Date().getTimezoneOffset();
+      console.log('Local timezone offset (minutes):', timezoneOffset);
+      
+      // Create start and end times with timezone compensation
       const [startHour, startMinute] = startTime.split(':').map(Number);
+      const [endHour, endMinute] = endTime.split(':').map(Number);
+      
+      // Create dates in local time
+      const startDateTime = new Date(shiftDate);
       startDateTime.setHours(startHour, startMinute, 0, 0);
       
       const endDateTime = new Date(shiftDate);
-      const [endHour, endMinute] = endTime.split(':').map(Number);
       endDateTime.setHours(endHour, endMinute, 0, 0);
       
-      // Add the shift
-      await api.post(`/shifts`, {
+      // Add timezone offset to compensate for the 8-hour shift
+      // Note: Add 8 hours (480 minutes) to counteract the issue
+      const offsetInMs = (timezoneOffset + 480) * 60 * 1000;
+      
+      const adjustedStartDateTime = new Date(startDateTime.getTime() + offsetInMs);
+      const adjustedEndDateTime = new Date(endDateTime.getTime() + offsetInMs);
+      
+      console.log('Original start time:', startDateTime.toISOString());
+      console.log('Adjusted start time:', adjustedStartDateTime.toISOString());
+      console.log('Original end time:', endDateTime.toISOString());
+      console.log('Adjusted end time:', adjustedEndDateTime.toISOString());
+      
+      // Add the shift with adjusted times
+      const response = await api.post(`/shifts`, {
         scheduleId,
         employeeId,
-        startTime: startDateTime.toISOString(),
-        endTime: endDateTime.toISOString()
+        startTime: adjustedStartDateTime.toISOString(),
+        endTime: adjustedEndDateTime.toISOString(),
+        status: 'Approved'
       });
       
+      console.log('Shift created response:', response.data);
+      
       // Refresh schedule data
-      const scheduleResponse = await api.get(`/schedules/${scheduleId}`);
-      setSchedule(scheduleResponse.data);
+      await refreshScheduleData();
       
       // Close modal
       closeModal();
     } catch (err) {
-      setError('Failed to add shift');
-      console.error(err);
+      setError(`Failed to add shift: ${err.response?.data?.error?.message || err.message}`);
+      console.error('Error adding shift:', err);
+    } finally {
+      setLoading(false);
     }
   };
   
@@ -113,14 +268,16 @@ const ScheduleView = () => {
     }
     
     try {
+      setLoading(true);
       await api.delete(`/shifts/${shiftId}`);
       
       // Refresh schedule data
-      const scheduleResponse = await api.get(`/schedules/${scheduleId}`);
-      setSchedule(scheduleResponse.data);
+      await refreshScheduleData();
     } catch (err) {
       setError('Failed to delete shift');
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
   
@@ -132,48 +289,10 @@ const ScheduleView = () => {
     );
   }
   
-  // Prepare the schedule grid data
-  const getScheduleGridData = () => {
-    if (!schedule || !schedule.shifts) {
-      return null;
-    }
-    
-    // Initialize grid
-    const grid = {};
-    
-    // Days of the week
-    for (let day = 0; day < 7; day++) {
-      const date = addDays(parseISO(schedule.weekStart), day);
-      const dateString = format(date, 'yyyy-MM-dd');
-      
-      grid[dateString] = {};
-      
-      // Time slots
-      for (const time of timeSlots) {
-        grid[dateString][time] = [];
-      }
-    }
-    
-    // Populate grid with shifts
-    for (const dateStr in schedule.shifts) {
-      for (const timeStr in schedule.shifts[dateStr]) {
-        const shifts = schedule.shifts[dateStr][timeStr];
-        
-        if (grid[dateStr] && grid[dateStr][timeStr]) {
-          grid[dateStr][timeStr] = shifts;
-        }
-      }
-    }
-    
-    return grid;
-  };
-  
-  const scheduleGrid = getScheduleGridData();
-  
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Хуваарь үүсгэх</h1>
+        <h1 className="text-2xl font-bold">Хуваарь үзэх</h1>
         
         <div className="flex space-x-4">
           <button
@@ -208,9 +327,9 @@ const ScheduleView = () => {
         </div>
       )}
       
-      {scheduleGrid && (
+      {processedSchedule && processedSchedule.shifts && (
         <div className="bg-white rounded-lg shadow-md overflow-x-auto">
-          <table className="min-w-full">
+          <table className="min-w-full border-collapse">
             <thead>
               <tr className="bg-gray-50">
                 <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
@@ -218,7 +337,7 @@ const ScheduleView = () => {
                 </th>
                 
                 {/* Day columns */}
-                {Object.keys(scheduleGrid).map((dateStr, index) => (
+                {Object.keys(processedSchedule.shifts).map((dateStr, index) => (
                   <th key={dateStr} className="py-3 px-6 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
                     <div>{daysOfWeek[index]}</div>
                     <div className="text-gray-400">{format(parseISO(dateStr), 'MM/dd')}</div>
@@ -229,37 +348,47 @@ const ScheduleView = () => {
             
             <tbody>
               {/* Time slots */}
-              {timeSlots.map(timeSlot => (
+              {timeSlots.map((timeSlot) => (
                 <tr key={timeSlot} className="border-b hover:bg-gray-50">
                   <td className="py-4 px-6 text-sm text-gray-500 whitespace-nowrap">
                     {timeSlot}
                   </td>
                   
                   {/* Shifts for each day */}
-                  {Object.keys(scheduleGrid).map(dateStr => (
-                    <td key={`${dateStr}-${timeSlot}`} className="py-2 px-2 text-sm border-l">
-                      {scheduleGrid[dateStr][timeSlot].map(shift => (
-                        <div 
-                          key={shift.id}
-                          className="bg-blue-100 border border-blue-300 rounded-md p-2 mb-1 relative"
-                        >
-                          <div className="font-medium">{shift.employeeName}</div>
-                          <div className="text-xs text-gray-500">
-                            {format(parseISO(shift.startTime), 'HH:mm')} - {format(parseISO(shift.endTime), 'HH:mm')}
-                          </div>
-                          
-                          <button
-                            className="absolute top-1 right-1 text-red-500 hover:text-red-700"
-                            onClick={() => handleDeleteShift(shift.id)}
+                  {Object.keys(processedSchedule.shifts).map((dateStr) => {
+                    // Get shifts for this time slot
+                    const shiftsAtTime = processedSchedule.shifts[dateStr][timeSlot] || [];
+                    
+                    return (
+                      <td key={`${dateStr}-${timeSlot}`} className="py-2 px-2 text-sm border-l">
+                        {shiftsAtTime.map(shift => (
+                          <div 
+                            key={`${shift.id}-${timeSlot}`}
+                            className={`${shift.isContinuation ? 'bg-blue-50' : 'bg-blue-100'} 
+                                      border border-blue-300 rounded-md p-2 mb-1 relative`}
                           >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
-                    </td>
-                  ))}
+                            <div className="font-medium">{shift.employeeName}</div>
+                            {!shift.isContinuation && (
+                              <div className="text-xs text-gray-500">
+                                {format(new Date(shift.startTime), 'HH:mm')} - {format(new Date(shift.endTime), 'HH:mm')}
+                              </div>
+                            )}
+                            
+                            {!shift.isContinuation && (
+                              <button
+                                className="absolute top-1 right-1 text-red-500 hover:text-red-700"
+                                onClick={() => handleDeleteShift(shift.id)}
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -284,6 +413,7 @@ const ScheduleView = () => {
                   onChange={handleModalInputChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                 >
+                  <option value="">-- Ажилтан сонгох --</option>
                   {employees.map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name}

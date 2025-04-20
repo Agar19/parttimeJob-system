@@ -26,7 +26,7 @@ const MainLayout = () => {
           <Link
             to="/manager/branches"
             className={`flex items-center py-3 px-4 space-x-2 ${
-              isActive('/manager/branches') ? 'bg-blue-900 text-white' : 'text-gray-300 hover:bg-blue-800'
+              isActive('/manager/branches') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
             }`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -38,7 +38,7 @@ const MainLayout = () => {
           <Link
             to="/manager/schedules"
             className={`flex items-center py-3 px-4 space-x-2 ${
-              isActive('/manager/schedule') ? 'bg-blue-900 text-white' : 'text-gray-300 hover:bg-blue-800'
+              isActive('/manager/schedule') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
             }`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -54,7 +54,7 @@ const MainLayout = () => {
           <Link
             to="/employee/availability"
             className={`flex items-center py-3 px-4 space-x-2 ${
-              isActive('/employee/availability') ? 'bg-blue-900 text-white' : 'text-gray-300 hover:bg-blue-800'
+              isActive('/employee/availability') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
             }`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -66,7 +66,7 @@ const MainLayout = () => {
           <Link
             to="/employee/shifts"
             className={`flex items-center py-3 px-4 space-x-2 ${
-              isActive('/employee/shifts') ? 'bg-blue-900 text-white' : 'text-gray-300 hover:bg-blue-800'
+              isActive('/employee/shifts') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
             }`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -83,12 +83,12 @@ const MainLayout = () => {
   
   return (
     <div className="flex h-screen bg-gray-100">
-      {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-30 w-64 bg-blue-700 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${
+      {/* Sidebar - Changed from blue to dark gray */}
+      <div className={`fixed inset-y-0 left-0 z-30 w-64 bg-gray-800 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${
         menuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
-        {/* Logo */}
-        <div className="flex items-center justify-center h-16 bg-blue-800 text-white font-bold px-6">
+        {/* Logo - Changed from blue to darker gray */}
+        <div className="flex items-center justify-center h-16 bg-gray-900 text-white font-bold px-6">
           <span>Ажлын хуваарийн систем</span>
         </div>
         
@@ -99,16 +99,15 @@ const MainLayout = () => {
           </nav>
         </div>
         
-        {/* Logout Button */}
+        {/* Logout Button - Now transparent with just icon visible */}
         <div className="absolute bottom-0 w-full p-4">
           <button
             onClick={handleLogout}
-            className="flex items-center w-full py-2 px-4 space-x-2 text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors"
+            className="flex items-center justify-center w-full py-2 px-4 text-white bg-transparent hover:bg-gray-700 rounded-md transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
             </svg>
-            <span>Гарах</span>
           </button>
         </div>
       </div>
@@ -131,7 +130,7 @@ const MainLayout = () => {
             {/* User Info */}
             <div className="flex items-center ml-auto">
               <span className="text-gray-700 mr-2">{user?.name}</span>
-              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white">
+              <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-white">
                 {user?.name.charAt(0)}
               </div>
             </div>

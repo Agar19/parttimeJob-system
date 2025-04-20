@@ -1,7 +1,6 @@
 const { pool } = require('../app');
 const scheduleService = require('../services/schedule.service');
 
-
 /**
  * Get schedule settings
  */
@@ -95,9 +94,6 @@ exports.getScheduleById = async (req, res, next) => {
 /**
  * Create schedule
  */
-// server/controllers/schedules.controller.js
-// Add this to your existing createSchedule function
-
 exports.createSchedule = async (req, res, next) => {
   try {
     const { 
@@ -110,7 +106,8 @@ exports.createSchedule = async (req, res, next) => {
       minGapBetweenShifts,
       minShiftsPerEmployee,
       maxShiftsPerEmployee,
-      additionalNotes
+      additionalNotes,
+      skipGeneration // New parameter to control auto-generation
     } = req.body;
     
     // Input validation
@@ -139,19 +136,10 @@ exports.createSchedule = async (req, res, next) => {
         });
       }
       
-      // Create schedule
-      const scheduleResult = await client.query(
-        `INSERT INTO schedules (
-          branch_id, 
-          week_start, 
-          created_at
-        )
-        VALUES ($1, $2, CURRENT_TIMESTAMP)
-        RETURNING id`,
-        [branchId, weekStart]
-      );
+      // Create schedule using the service (with skipGeneration parameter)
+      const scheduleResult = await scheduleService.createSchedule(branchId, weekStart, skipGeneration || false);
       
-      const scheduleId = scheduleResult.rows[0].id;
+      const scheduleId = scheduleResult.scheduleId;
       
       // Store schedule settings
       await client.query(
@@ -180,7 +168,11 @@ exports.createSchedule = async (req, res, next) => {
       
       await client.query('COMMIT');
       
-      res.status(201).json({ scheduleId });
+      // Return the scheduleId and skipGeneration flag in response
+      res.status(201).json({ 
+        scheduleId,
+        skipGeneration: scheduleResult.skipGeneration
+      });
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
