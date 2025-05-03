@@ -102,14 +102,14 @@ class ScheduleService {
       
       console.log('Selected days for scheduling:', selectedDays);
       
-      // Get scheduling parameters with fallbacks for missing values
+      // цагиийн хуваарийн параметрүүд
       const startTime = scheduleWithSettings.start_time ? scheduleWithSettings.start_time.substring(0, 5) : '07:00';
       const endTime = scheduleWithSettings.end_time ? scheduleWithSettings.end_time.substring(0, 5) : '23:00';
       const minGapBetweenShifts = parseInt(scheduleWithSettings.min_gap_between_shifts) || 8;
       const minShiftsPerEmployee = parseInt(scheduleWithSettings.min_shifts_per_employee) || 1;
       const maxShiftsPerEmployee = parseInt(scheduleWithSettings.max_shifts_per_employee) || 5;
-      const minShiftLength = 4; // Minimum shift length in hours
-      const maxShiftLength = 8; // Maximum shift length in hours
+      const minShiftLength = 4; 
+      const maxShiftLength = 8; 
       
       console.log('Scheduling parameters:', {
         startTime,
@@ -428,21 +428,20 @@ class ScheduleService {
       employeeShiftCounts[emp.id] = 0;
     });
     
-    // Sort shift slots by difficulty to fill (fewer available employees first)
-    // and then by day and time
+    // Ажилчдын завтай цагуудаар болон өдөр, цагаар хуваарийг sort хийнэ
     const sortedShiftSlots = [...shiftSlots].sort((a, b) => {
       const keyA = `${a.day}-${a.startTime}-${a.endTime}`;
       const keyB = `${b.day}-${b.startTime}-${b.endTime}`;
       
-      // First sort by number of available employees (ascending)
+      // ажилчдыг өсөхөөр эрэмбэлнэ.
       const availableA = shiftAvailableEmployees[keyA] || 0;
       const availableB = shiftAvailableEmployees[keyB] || 0;
       
       if (availableA !== availableB) {
-        return availableA - availableB; // Prioritize shifts with fewer available employees
+        return availableA - availableB; // цөөхөн ажилтан сонгогдсон цагуудыг
       }
       
-      // Then by shift length (descending, prefer longer shifts)
+      // хуваарийг хугацаараар эрэмбэлнэ. Урт shift-ийг эхлээд
       const lengthA = parseInt(a.endTime) - parseInt(a.startTime);
       const lengthB = parseInt(b.endTime) - parseInt(b.startTime);
       if (lengthA !== lengthB) {
@@ -463,11 +462,10 @@ class ScheduleService {
       }
     });
     
-    // Assign each shift
+    // хуваарийг тус бүрт нь ажилчдад хуваарилна
     for (const shift of sortedShiftSlots) {
-      // Find available employees for this shift
+      // Тухайн хуваарьд таарах ажилчдыг filter хийнэ
       const availableEmployees = employees.filter(emp => {
-        // Check if employee is available based on their schedule
         if (!isEmployeeAvailableForShift(emp, shift, employeeAvailability)) {
           return false;
         }
@@ -517,11 +515,11 @@ class ScheduleService {
             return aShiftsOnDay - bShiftsOnDay;
           });
           
-          // Assign to best employee
+          // Тухайн цагт ажиллах боломжтой ажилчдыг сонгоно 
           const assignedEmployee = candidateEmployees[0];
           employeeShiftCounts[assignedEmployee.id]++;
           
-          // Track this assignment to prevent overlaps
+          // оноосон хуваарийг тэмдэглэнэ
           if (!employeeAssignedShifts[assignedEmployee.id][shift.day]) {
             employeeAssignedShifts[assignedEmployee.id][shift.day] = [];
           }
@@ -550,11 +548,11 @@ class ScheduleService {
     
     console.log(`Enhanced greedy algorithm assigned ${assignments.length} shifts out of ${shiftSlots.length} possible slots`);
     
-    // Log the coverage percentage
+    // Хуваарийн дүүргэлтийн хувь хэмжээг тооцоолно
     const coveragePercentage = (assignments.length / shiftSlots.length) * 100;
     console.log(`Schedule coverage: ${coveragePercentage.toFixed(2)}%`);
     
-    // Log employee shift distribution
+    // Ажилчин тус бүрт хэдэн хуваарь олгосныг тоолно
     console.log('Shift distribution:');
     for (const emp of employees) {
       const shiftCount = employeeShiftCounts[emp.id] || 0;
@@ -576,15 +574,14 @@ class ScheduleService {
     const checkConstraints = (assignments) => {
       const violations = [];
       
-      // Count shifts per employee
+      // Ажилчдад олгогдсон хуваарийн тоог тоолно
       const shiftCounts = {};
       assignments.forEach(assignment => {
         shiftCounts[assignment.employeeId] = (shiftCounts[assignment.employeeId] || 0) + 1;
       });
       
-      // Check maximum shifts per employee
+      // maximum shift ийн тоог хэтэрсэн эсэхийг шалгана
       for (const empId in shiftCounts) {
-        // Check max shifts constraint
         if (shiftCounts[empId] > constraints.maxShiftsPerEmployee) {
           violations.push({
             type: 'maxShiftsExceeded',
@@ -593,7 +590,7 @@ class ScheduleService {
           });
         }
         
-        // Check min shifts constraint
+        // Ажиллах доод хэмжээнд хүрэхгүй байгаа эсэхийг шалгана
         if (shiftCounts[empId] < constraints.minShiftsPerEmployee) {
           violations.push({
             type: 'minShiftsNotMet',
@@ -603,8 +600,7 @@ class ScheduleService {
         }
       }
       
-      // Check for insufficient rest between shifts
-      // Group assignments by employee
+      // Хуваарь хоорондын зай (амралт) хангалттай эсэхийг шалгана
       const employeeAssignments = {};
       assignments.forEach(assignment => {
         if (!employeeAssignments[assignment.employeeId]) {
@@ -693,7 +689,7 @@ class ScheduleService {
       // Check for violations
       const violations = checkConstraints(assignments);
       
-      // If no violations, return the assignments
+      // Асуудал байхгүй бол буцаана
       if (violations.length === 0) {
         console.log(`No violations found at depth ${depth}, solution is optimal`);
         return assignments;
@@ -712,7 +708,7 @@ class ScheduleService {
           // Choose the second shift to reassign
           const shiftToReassign = violation.shifts[1];
           
-          // Find alternative employee
+          // Өөр ажилтан олох
           const alternativeEmployeeId = this._findAlternativeEmployee(
             shiftToReassign,
             employees,
