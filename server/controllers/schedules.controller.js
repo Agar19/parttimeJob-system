@@ -1,5 +1,41 @@
+// Update to schedules.controller.js to support custom settings
+
 const { pool } = require('../app');
 const scheduleService = require('../services/schedule.service');
+
+/**
+ * Get schedule settings templates
+ * This is a new endpoint to support the templates feature
+ */
+exports.getScheduleSettingsTemplates = async (req, res, next) => {
+  try {
+    const templates = await scheduleService.getScheduleSettingsTemplates();
+    res.json(templates);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Save a schedule settings template
+ * This is a new endpoint to support saving templates
+ */
+exports.saveScheduleSettingsTemplate = async (req, res, next) => {
+  try {
+    const templateData = req.body;
+    
+    if (!templateData.name) {
+      return res.status(400).json({
+        error: { message: 'Template name is required' }
+      });
+    }
+    
+    const result = await scheduleService.saveScheduleSettingsTemplate(templateData);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * Get schedule settings
@@ -19,7 +55,14 @@ exports.getScheduleSettings = async (req, res, next) => {
       return res.json({
         selected_days: '[0,1,2,3,4,5,6]',
         start_time: '07:00',
-        end_time: '23:00'
+        end_time: '23:00',
+        min_gap_between_shifts: 8,
+        min_shifts_per_employee: 1,
+        max_shifts_per_employee: 5,
+        min_shift_length: 4,
+        max_shift_length: 8,
+        max_employees_per_shift: 5,
+        shift_increment: 2
       });
     }
     
@@ -93,6 +136,7 @@ exports.getScheduleById = async (req, res, next) => {
 
 /**
  * Create schedule
+ * Updated to support custom settings
  */
 exports.createSchedule = async (req, res, next) => {
   try {
@@ -100,14 +144,18 @@ exports.createSchedule = async (req, res, next) => {
       branchId, 
       weekStart, 
       scheduleName, 
-      selectedDays, 
-      startTime, 
-      endTime,
-      minGapBetweenShifts,
-      minShiftsPerEmployee,
-      maxShiftsPerEmployee,
-      additionalNotes,
-      skipGeneration // New parameter to control auto-generation
+      selected_days, 
+      start_time, 
+      end_time,
+      min_gap_between_shifts,
+      min_shifts_per_employee,
+      max_shifts_per_employee,
+      min_shift_length,
+      max_shift_length,
+      max_employees_per_shift,
+      shift_increment,
+      additional_notes,
+      skipGeneration // Parameter to control auto-generation
     } = req.body;
     
     // Input validation
@@ -136,35 +184,85 @@ exports.createSchedule = async (req, res, next) => {
         });
       }
       
-      // Create schedule using the service (with skipGeneration parameter)
+      // Create schedule using the service
       const scheduleResult = await scheduleService.createSchedule(branchId, weekStart, skipGeneration || false);
       
       const scheduleId = scheduleResult.scheduleId;
       
-      // Store schedule settings
-      await client.query(
-        `INSERT INTO schedule_settings (
-          schedule_id,
-          selected_days,
-          start_time,
-          end_time,
-          min_gap_between_shifts,
-          min_shifts_per_employee,
-          max_shifts_per_employee,
-          additional_notes
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
+      // Store custom schedule settings
+      // Check if the table has the new columns
+      const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='schedule_settings' AND column_name='min_shift_length'
+      `);
+      
+      let query;
+      let params;
+      
+      if (columnCheck.rows.length > 0) {
+        // Use extended schema with all new parameters
+        query = `
+          INSERT INTO schedule_settings (
+            schedule_id,
+            selected_days,
+            start_time,
+            end_time,
+            min_gap_between_shifts,
+            min_shifts_per_employee,
+            max_shifts_per_employee,
+            min_shift_length,
+            max_shift_length,
+            max_employees_per_shift,
+            shift_increment,
+            additional_notes
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `;
+        
+        params = [
           scheduleId,
-          selectedDays ? JSON.stringify(selectedDays) : '[0,1,2,3,4]',
-          startTime || '08:00',
-          endTime || '17:00',
-          minGapBetweenShifts || null,
-          minShiftsPerEmployee || null,
-          maxShiftsPerEmployee || null,
-          additionalNotes || null
-        ]
-      );
+          selected_days ? JSON.stringify(selected_days) : '[0,1,2,3,4,5,6]',
+          start_time || '07:00',
+          end_time || '23:00',
+          min_gap_between_shifts || 8,
+          min_shifts_per_employee || 1,
+          max_shifts_per_employee || 5,
+          min_shift_length || 4,
+          max_shift_length || 8,
+          max_employees_per_shift || 5,
+          shift_increment || 2,
+          additional_notes || scheduleName || null
+        ];
+      } else {
+        // Use original schema
+        query = `
+          INSERT INTO schedule_settings (
+            schedule_id,
+            selected_days,
+            start_time,
+            end_time,
+            min_gap_between_shifts,
+            min_shifts_per_employee,
+            max_shifts_per_employee,
+            additional_notes
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `;
+        
+        params = [
+          scheduleId,
+          selected_days ? JSON.stringify(selected_days) : '[0,1,2,3,4,5,6]',
+          start_time || '07:00',
+          end_time || '23:00',
+          min_gap_between_shifts || 8,
+          min_shifts_per_employee || 1,
+          max_shifts_per_employee || 5,
+          additional_notes || scheduleName || null
+        ];
+      }
+      
+      await client.query(query, params);
       
       await client.query('COMMIT');
       
@@ -185,14 +283,16 @@ exports.createSchedule = async (req, res, next) => {
 };
 
 /**
- * Generate schedule
+ * Generate schedule with custom settings
+ * Updated to accept custom settings
  */
 exports.generateSchedule = async (req, res, next) => {
   try {
     const { scheduleId } = req.params;
+    const customSettings = req.body; // Optional custom settings from request body
     
     // Generate shifts for schedule
-    const result = await scheduleService.generateSchedule(scheduleId);
+    const result = await scheduleService.generateSchedule(scheduleId, customSettings);
     
     res.json(result);
   } catch (error) {

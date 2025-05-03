@@ -1,8 +1,8 @@
-// client/src/pages/manager/ScheduleCreation.jsx
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api';
 import { format, startOfWeek, addDays } from 'date-fns';
+import ScheduleSettingsModal from '../../components/ScheduleSettingsModal';
 
 const ScheduleCreation = () => {
   const { branchId } = useParams();
@@ -16,6 +16,10 @@ const ScheduleCreation = () => {
   const [schedules, setSchedules] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  
+  // Settings modal state
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [scheduleSettings, setScheduleSettings] = useState({});
   
   // Enhanced modal data for schedule creation
   const [modalData, setModalData] = useState({
@@ -59,40 +63,33 @@ const ScheduleCreation = () => {
     fetchData();
   }, [branchId]);
 
-  // Auto-generated schedule with algorithm
-  const handleAutoGenerateSchedule = async () => {
+  // Functions for the settings modal
+  const openSettingsModal = () => {
+    setIsSettingsModalOpen(true);
+  };
+
+  const closeSettingsModal = () => {
+    setIsSettingsModalOpen(false);
+  };
+
+  const handleSaveSettings = async (settings) => {
     try {
       setLoading(true);
       setError('');
       
-      if (employees.length === 0) {
-        setError("Cannot generate schedule: No employees available for this branch.");
-        setLoading(false);
-        return;
-      }
-      
       // Format date for API
       const formattedDate = format(selectedWeek, 'yyyy-MM-dd');
       
-      console.log('Creating auto-generated schedule with start date:', formattedDate);
+      console.log('Creating schedule with custom settings:', settings);
       
-      // Create schedule with all data needed for the algorithm
-      const scheduleData = {
+      // Create schedule with settings
+      const response = await api.post('/schedules', {
         branchId,
         weekStart: formattedDate,
-        scheduleName: 'Auto-generated Schedule',
-        selectedDays: [0, 1, 2, 3, 4, 5, 6], // All days of the week
-        startTime: '07:00',
-        endTime: '23:00',
-        minGapBetweenShifts: '8',  // 8 hours minimum between shifts
-        minShiftsPerEmployee: '1', // At least 1 shift per employee
-        maxShiftsPerEmployee: '5',  // Maximum 5 shifts per employee
-        skipGeneration: false // Use auto-generation
-      };
-      
-      console.log("Sending schedule data:", scheduleData);
-      
-      const response = await api.post('/schedules', scheduleData);
+        scheduleName: settings.scheduleName || 'Custom Schedule',
+        ...settings,
+        skipGeneration: false // Use auto-generation with custom settings
+      });
       
       console.log('Schedule created response:', response.data);
       
@@ -103,9 +100,9 @@ const ScheduleCreation = () => {
       const scheduleId = response.data.scheduleId;
       
       try {
-        // Generate shifts automatically using the algorithm
+        // Generate shifts automatically using custom settings
         console.log('Generating shifts for schedule:', scheduleId);
-        const generateResponse = await api.post(`/schedules/${scheduleId}/generate`);
+        const generateResponse = await api.post(`/schedules/${scheduleId}/generate`, settings);
         console.log('Generate shifts response:', generateResponse.data);
         
         // Navigate to the schedule view
@@ -126,7 +123,13 @@ const ScheduleCreation = () => {
       setError(`Failed to create schedule: ${err.response?.data?.error?.message || err.message}`);
     } finally {
       setLoading(false);
+      setIsSettingsModalOpen(false);
     }
+  };
+
+  // Auto-generated schedule with algorithm
+  const handleAutoGenerateSchedule = () => {
+    openSettingsModal();
   };
 
   // Manual schedule creation that doesn't call the generate endpoint
@@ -154,13 +157,13 @@ const ScheduleCreation = () => {
         branchId,
         weekStart: formattedDate,
         scheduleName: modalData.scheduleName || 'Manual Schedule',
-        selectedDays: selectedDaysArray,
-        startTime: modalData.startTime,
-        endTime: modalData.endTime,
-        minGapBetweenShifts: modalData.minGapBetweenShifts,
-        minShiftsPerEmployee: modalData.minShiftsPerEmployee,
-        maxShiftsPerEmployee: modalData.maxShiftsPerEmployee,
-        additionalNotes: modalData.additionalNotes,
+        selected_days: selectedDaysArray,
+        start_time: modalData.startTime,
+        end_time: modalData.endTime,
+        min_gap_between_shifts: modalData.minGapBetweenShifts,
+        min_shifts_per_employee: modalData.minShiftsPerEmployee,
+        max_shifts_per_employee: modalData.maxShiftsPerEmployee,
+        additional_notes: modalData.additionalNotes,
         skipGeneration: true // This is the key - explicit flag to skip auto-generation
       });
       
@@ -363,7 +366,7 @@ const ScheduleCreation = () => {
         )}
       </div>
       
-      {/* Schedule Creation Modal */}
+      {/* Schedule Creation Modal (Original) */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
@@ -522,8 +525,20 @@ const ScheduleCreation = () => {
           </div>
         </div>
       )}
+      
+      {/* Settings Modal (New) for Auto-generation */}
+      {isSettingsModalOpen && (
+        <ScheduleSettingsModal
+          isOpen={isSettingsModalOpen}
+          onClose={closeSettingsModal}
+          onSave={handleSaveSettings}
+          initialSettings={{
+            scheduleName: `${format(selectedWeek, 'yyyy-MM-dd')} хуваарь`,
+          }}
+        />
+      )}
     </div>
   );
 };
 
-export default ScheduleCreation;  
+export default ScheduleCreation;

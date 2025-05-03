@@ -1,3 +1,4 @@
+// server/routes/schedules.routes.js
 const express = require('express');
 const schedulesController = require('../controllers/schedules.controller');
 const { authenticateToken, authorizeRole } = require('../middleware/auth.middleware');
@@ -5,6 +6,10 @@ const router = express.Router();
 
 // Protected routes (need authentication)
 router.use(authenticateToken);
+
+// Routes for working with schedule settings templates
+router.get('/templates', schedulesController.getScheduleSettingsTemplates);
+router.post('/templates', schedulesController.saveScheduleSettingsTemplate);
 
 // Routes accessible to all authenticated users
 router.get('/:scheduleId/settings', schedulesController.getScheduleSettings);
