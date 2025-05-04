@@ -204,46 +204,34 @@ const ScheduleView = () => {
         return;
       }
       
-      // Calculate date from day of week
-      const weekStartDate = parseISO(schedule.weekStart);
-      console.log('Week start date after parsing:', weekStartDate);
+      // Get the week start date directly from the schedule data
+      const weekStartDate = new Date(schedule.weekStart);
+      console.log('Week start date:', weekStartDate.toISOString());
       
-      const shiftDate = addDays(weekStartDate, Number(day));
-      console.log('Calculated shift date:', shiftDate);
+      // Calculate the shift date by adding the day index
+      const shiftDate = new Date(weekStartDate);
+      shiftDate.setDate(weekStartDate.getDate() + parseInt(day));
+      console.log('Calculated shift date:', shiftDate.toISOString());
       
-      // Calculate timezone offset in minutes
-      const timezoneOffset = new Date().getTimezoneOffset();
-      console.log('Local timezone offset (minutes):', timezoneOffset);
-      
-      // Create start and end times with timezone compensation
+      // Create date objects for start and end times on the correct day
       const [startHour, startMinute] = startTime.split(':').map(Number);
-      const [endHour, endMinute] = endTime.split(':').map(Number);
-      
-      // Create dates in local time
       const startDateTime = new Date(shiftDate);
       startDateTime.setHours(startHour, startMinute, 0, 0);
       
+      const [endHour, endMinute] = endTime.split(':').map(Number);
       const endDateTime = new Date(shiftDate);
       endDateTime.setHours(endHour, endMinute, 0, 0);
       
-      // Add timezone offset to compensate for the 8-hour shift
-      // Note: Add 8 hours (480 minutes) to counteract the issue
-      const offsetInMs = (timezoneOffset + 480) * 60 * 1000;
+      console.log('Final shift times:');
+      console.log('Start time:', startDateTime.toISOString());
+      console.log('End time:', endDateTime.toISOString());
       
-      const adjustedStartDateTime = new Date(startDateTime.getTime() + offsetInMs);
-      const adjustedEndDateTime = new Date(endDateTime.getTime() + offsetInMs);
-      
-      console.log('Original start time:', startDateTime.toISOString());
-      console.log('Adjusted start time:', adjustedStartDateTime.toISOString());
-      console.log('Original end time:', endDateTime.toISOString());
-      console.log('Adjusted end time:', adjustedEndDateTime.toISOString());
-      
-      // Add the shift with adjusted times
+      // Add the shift with ISO string times
       const response = await api.post(`/shifts`, {
         scheduleId,
         employeeId,
-        startTime: adjustedStartDateTime.toISOString(),
-        endTime: adjustedEndDateTime.toISOString(),
+        startTime: startDateTime.toISOString(),
+        endTime: endDateTime.toISOString(),
         status: 'Approved'
       });
       
