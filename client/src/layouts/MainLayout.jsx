@@ -46,6 +46,30 @@ const MainLayout = () => {
             </svg>
             <span>Цагийн хуваарь</span>
           </Link>
+          
+          <Link
+            to="/manager/employees"
+            className={`flex items-center py-3 px-4 space-x-2 ${
+              isActive('/manager/employees') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+            </svg>
+            <span>Ажилтнууд</span>
+          </Link>
+
+          <Link
+            to="/manager/profile"
+            className={`flex items-center py-3 px-4 space-x-2 ${
+              isActive('/manager/profile') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+            </svg>
+            <span>Профайл</span>
+          </Link>
         </>
       );
     } else if (user.role === 'Employee') {
@@ -73,6 +97,18 @@ const MainLayout = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
             </svg>
             <span>Миний ээлж</span>
+          </Link>
+          
+          <Link
+            to="/employee/profile"
+            className={`flex items-center py-3 px-4 space-x-2 ${
+              isActive('/employee/profile') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+            </svg>
+            <span>Профайл</span>
           </Link>
         </>
       );
@@ -130,7 +166,10 @@ const MainLayout = () => {
             {/* User Info */}
             <div className="flex items-center ml-auto">
               <span className="text-gray-700 mr-2">{user?.name}</span>
-              <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-white">
+              <div 
+                className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-white cursor-pointer"
+                onClick={() => navigate(user?.role === 'Employee' ? '/employee/profile' : '/manager/profile')}
+              >
                 {user?.name.charAt(0)}
               </div>
             </div>

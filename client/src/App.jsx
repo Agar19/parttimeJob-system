@@ -13,10 +13,15 @@ import NotFound from './pages/NotFound';
 import BranchSelection from './pages/manager/BranchSelection';
 import ScheduleCreation from './pages/manager/ScheduleCreation';
 import ScheduleView from './pages/manager/ScheduleView';
+import EmployeeManagement from './pages/manager/EmployeeManagement';
+import EmployeeProfile from './pages/manager/EmployeeProfile';
+import ManagerProfile from './pages/manager/ManagerProfile';
 
 // Employee Pages
 import Availability from './pages/employee/Availability';
 import ShiftView from './pages/employee/ShiftView';
+// Import the employee profile with a different alias to avoid conflict
+import EmployeeOwnProfile from './pages/employee/EmployeeProfile';
 
 // Protected route component
 const ProtectedRoute = ({ element, allowedRoles }) => {
@@ -55,6 +60,9 @@ const App = () => {
             <Route path="branches" element={<BranchSelection />} />
             <Route path="schedules/:branchId" element={<ScheduleCreation />} />
             <Route path="schedule/:scheduleId" element={<ScheduleView />} />
+            <Route path="employees" element={<EmployeeManagement />} />
+            <Route path="employee/:employeeId" element={<EmployeeProfile />} />
+            <Route path="profile" element={<ManagerProfile />} />
           </Route>
           
           {/* Employee Routes */}
@@ -67,6 +75,7 @@ const App = () => {
             <Route index element={<Navigate to="/employee/availability" />} />
             <Route path="availability" element={<Availability />} />
             <Route path="shifts" element={<ShiftView />} />
+            <Route path="profile" element={<EmployeeOwnProfile />} />
           </Route>
           
           {/* Default Routes */}

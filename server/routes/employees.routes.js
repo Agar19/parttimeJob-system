@@ -27,4 +27,7 @@ router.patch('/:employeeId/status', employeesController.updateEmployeeStatus);
 // Change employee branch
 router.patch('/:employeeId/branch', employeesController.changeEmployeeBranch);
 
+// Delete employee
+router.delete('/:employeeId', employeesController.deleteEmployee);
+
 module.exports = router;

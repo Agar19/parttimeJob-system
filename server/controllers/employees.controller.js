@@ -231,3 +231,72 @@ exports.changeEmployeeBranch = async (req, res, next) => {
   next(error);
 }
 };
+
+// Add this to server/controllers/employees.controller.js
+
+/**
+ * Delete employee
+ */
+exports.deleteEmployee = async (req, res, next) => {
+  try {
+    const { employeeId } = req.params;
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // First get the user_id for this employee
+      const employeeResult = await client.query(
+        'SELECT user_id FROM employees WHERE id = $1',
+        [employeeId]
+      );
+      
+      if (employeeResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({
+          error: { message: 'Employee not found' }
+        });
+      }
+      
+      const userId = employeeResult.rows[0].user_id;
+      
+      // Delete availability records
+      await client.query(
+        'DELETE FROM availability WHERE employee_id = $1',
+        [employeeId]
+      );
+      
+      // Delete shift assignments
+      await client.query(
+        'DELETE FROM shifts WHERE employee_id = $1',
+        [employeeId]
+      );
+      
+      // Delete the employee record
+      await client.query(
+        'DELETE FROM employees WHERE id = $1',
+        [employeeId]
+      );
+      
+      // Delete the user record
+      await client.query(
+        'DELETE FROM users WHERE id = $1',
+        [userId]
+      );
+      
+      await client.query('COMMIT');
+      
+      res.json({ 
+        message: 'Employee deleted successfully',
+        deletedId: employeeId
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
+};
