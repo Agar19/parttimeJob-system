@@ -13,6 +13,8 @@ app.use('/api/employees', require('./routes/employees.routes'));
 app.use('/api/schedules', require('./routes/schedules.routes'));
 app.use('/api/shifts', require('./routes/shifts.routes'));
 app.use('/api/availability', require('./routes/availability.routes'));
+// In server/index.js or wherever you define your routes
+app.use('/api/shift-trades', require('./routes/shift-trades.routes'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {

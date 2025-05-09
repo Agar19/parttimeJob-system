@@ -16,12 +16,13 @@ import ScheduleView from './pages/manager/ScheduleView';
 import EmployeeManagement from './pages/manager/EmployeeManagement';
 import EmployeeProfile from './pages/manager/EmployeeProfile';
 import ManagerProfile from './pages/manager/ManagerProfile';
+import ShiftTradeApprovals from './pages/manager/ShiftTradeApprovals';
 
 // Employee Pages
 import Availability from './pages/employee/Availability';
 import ShiftView from './pages/employee/ShiftView';
-// Import the employee profile with a different alias to avoid conflict
 import EmployeeOwnProfile from './pages/employee/EmployeeProfile';
+import ShiftTrades from './pages/employee/ShiftTrades';
 
 // Protected route component
 const ProtectedRoute = ({ element, allowedRoles }) => {
@@ -62,6 +63,7 @@ const App = () => {
             <Route path="schedule/:scheduleId" element={<ScheduleView />} />
             <Route path="employees" element={<EmployeeManagement />} />
             <Route path="employee/:employeeId" element={<EmployeeProfile />} />
+            <Route path="shift-trades" element={<ShiftTradeApprovals />} />
             <Route path="profile" element={<ManagerProfile />} />
           </Route>
           
@@ -75,6 +77,7 @@ const App = () => {
             <Route index element={<Navigate to="/employee/availability" />} />
             <Route path="availability" element={<Availability />} />
             <Route path="shifts" element={<ShiftView />} />
+            <Route path="shift-trades" element={<ShiftTrades />} />
             <Route path="profile" element={<EmployeeOwnProfile />} />
           </Route>
           

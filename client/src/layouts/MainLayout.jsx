@@ -58,6 +58,18 @@ const MainLayout = () => {
             </svg>
             <span>Ажилтнууд</span>
           </Link>
+          
+          <Link
+            to="/manager/shift-trades"
+            className={`flex items-center py-3 px-4 space-x-2 ${
+              isActive('/manager/shift-trades') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+            </svg>
+            <span>Ээлж солилцох</span>
+          </Link>
 
           <Link
             to="/manager/profile"
@@ -97,6 +109,18 @@ const MainLayout = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
             </svg>
             <span>Миний ээлж</span>
+          </Link>
+          
+          <Link
+            to="/employee/shift-trades"
+            className={`flex items-center py-3 px-4 space-x-2 ${
+              isActive('/employee/shift-trades') ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+            </svg>
+            <span>Ээлж солилцох</span>
           </Link>
           
           <Link
