@@ -1,9 +1,9 @@
-// client/src/pages/employee/ShiftTrades.jsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
+import { formatLocalDate, formatTimeOnly } from '../../utils/dateUtils';
 
 const ShiftTrades = () => {
   const { user } = useAuth();
@@ -135,12 +135,6 @@ const ShiftTrades = () => {
     }
   };
   
-  // Helper function to format date/time
-  const formatDateTime = (dateTimeStr) => {
-    const date = parseISO(dateTimeStr);
-    return format(date, 'yyyy-MM-dd HH:mm');
-  };
-  
   // Helper function to get trade status text
   const getStatusText = (status) => {
     switch (status) {
@@ -258,7 +252,7 @@ const ShiftTrades = () => {
                     <tr key={trade.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {formatDateTime(trade.start_time)} - {formatDateTime(trade.end_time)}
+                          {formatLocalDate(trade.start_time)} - {formatTimeOnly(trade.end_time)}
                         </div>
                         <div className="text-sm text-gray-500">
                           {trade.branch_name}
@@ -275,7 +269,7 @@ const ShiftTrades = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {formatDateTime(trade.created_at)}
+                        {formatLocalDate(trade.created_at)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         {trade.status === 'Pending' && (
@@ -309,10 +303,10 @@ const ShiftTrades = () => {
                 <div key={trade.id} className="bg-white rounded-lg shadow-md overflow-hidden">
                   <div className="px-6 py-4">
                     <div className="font-bold text-xl mb-2">
-                      {format(parseISO(trade.start_time), 'yyyy-MM-dd')}
+                      {formatLocalDate(trade.start_time, false)}
                     </div>
                     <p className="text-gray-700 text-base mb-2">
-                      {format(parseISO(trade.start_time), 'HH:mm')} - {format(parseISO(trade.end_time), 'HH:mm')}
+                      {formatTimeOnly(trade.start_time)} - {formatTimeOnly(trade.end_time)}
                     </p>
                     <p className="text-gray-600 text-sm mb-2">
                       Салбар: {trade.branch_name}
@@ -370,7 +364,7 @@ const ShiftTrades = () => {
                   <option value="">-- Ээлж сонгох --</option>
                   {myShifts.map(shift => (
                     <option key={shift.id} value={shift.id}>
-                      {format(parseISO(shift.start_time), 'yyyy-MM-dd HH:mm')} - {format(parseISO(shift.end_time), 'HH:mm')}
+                      {formatLocalDate(shift.start_time)} - {formatTimeOnly(shift.end_time)}
                     </option>
                   ))}
                 </select>

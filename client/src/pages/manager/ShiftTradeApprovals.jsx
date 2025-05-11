@@ -1,9 +1,9 @@
-// client/src/pages/manager/ShiftTradeApprovals.jsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { format, parseISO } from 'date-fns';
+import { format } from 'date-fns';
+import { formatLocalDate, formatTimeOnly } from '../../utils/dateUtils';
 
 const ShiftTradeApprovals = () => {
   const { user } = useAuth();
@@ -88,12 +88,6 @@ const ShiftTradeApprovals = () => {
     } finally {
       setLoading(false);
     }
-  };
-  
-  // Helper function to format date/time
-  const formatDateTime = (dateTimeStr) => {
-    const date = parseISO(dateTimeStr);
-    return format(date, 'yyyy-MM-dd HH:mm');
   };
   
   // Helper function to get trade status text
@@ -198,7 +192,7 @@ const ShiftTradeApprovals = () => {
                 <tr key={trade.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
-                      {formatDateTime(trade.start_time)} - {formatDateTime(trade.end_time)}
+                      {formatLocalDate(trade.start_time)} - {formatTimeOnly(trade.end_time)}
                     </div>
                     <div className="text-sm text-gray-500">
                       {trade.branch_name}
@@ -220,7 +214,7 @@ const ShiftTradeApprovals = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {formatDateTime(trade.created_at)}
+                    {formatLocalDate(trade.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                     <button
@@ -277,7 +271,7 @@ const ShiftTradeApprovals = () => {
                 <tr key={trade.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
-                      {formatDateTime(trade.start_time)} - {formatDateTime(trade.end_time)}
+                      {formatLocalDate(trade.start_time)} - {formatTimeOnly(trade.end_time)}
                     </div>
                     <div className="text-sm text-gray-500">
                       {trade.branch_name}
@@ -303,7 +297,7 @@ const ShiftTradeApprovals = () => {
                       <div>
                         <div>{trade.approved_by_name}</div>
                         <div className="text-xs text-gray-500">
-                          {trade.approved_at ? formatDateTime(trade.approved_at) : ''}
+                          {trade.approved_at ? formatLocalDate(trade.approved_at) : ''}
                         </div>
                       </div>
                     ) : (
