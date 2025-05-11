@@ -7,6 +7,8 @@ exports.getShiftsBySchedule = async (req, res, next) => {
   try {
     const { scheduleId } = req.params;
     
+    console.log(`Getting shifts for schedule: ${scheduleId}`);
+    
     const result = await pool.query(
       `SELECT s.id, s.employee_id, s.start_time, s.end_time, s.status,
               e.user_id, u.name as employee_name, b.name as branch_name
@@ -20,8 +22,11 @@ exports.getShiftsBySchedule = async (req, res, next) => {
       [scheduleId]
     );
     
+    console.log(`Found ${result.rows.length} shifts for schedule ${scheduleId}`);
+    
     res.json(result.rows);
   } catch (error) {
+    console.error('Error in getShiftsBySchedule:', error);
     next(error);
   }
 };
@@ -33,6 +38,8 @@ exports.getShiftsByEmployee = async (req, res, next) => {
   try {
     const { employeeId } = req.params;
     const { startDate, endDate } = req.query;
+    
+    console.log(`Fetching shifts for employee ${employeeId} from ${startDate} to ${endDate}`);
     
     let query = `
       SELECT s.id, s.schedule_id, s.start_time, s.end_time, s.status,
@@ -46,16 +53,29 @@ exports.getShiftsByEmployee = async (req, res, next) => {
     const queryParams = [employeeId];
     
     if (startDate && endDate) {
-      query += ` AND s.start_time >= $2 AND s.start_time <= $3`;
+      // Important: Use proper date range filtering
+      query += ` AND DATE(s.start_time) >= $2 AND DATE(s.start_time) <= $3`;
       queryParams.push(startDate, endDate);
+      
+      console.log(`Using date filter: ${startDate} to ${endDate}`);
     }
     
     query += ` ORDER BY s.start_time`;
     
+    console.log('Executing query:', query);
+    console.log('With params:', queryParams);
+    
     const result = await pool.query(query, queryParams);
+    
+    console.log(`Found ${result.rows.length} shifts for employee ${employeeId}`);
+    result.rows.forEach(shift => {
+      const shiftDate = new Date(shift.start_time).toISOString().split('T')[0];
+      console.log(`Shift ID: ${shift.id}, Date: ${shiftDate}, Time: ${new Date(shift.start_time).toISOString()}`);
+    });
     
     res.json(result.rows);
   } catch (error) {
+    console.error('Error in getShiftsByEmployee:', error);
     next(error);
   }
 };
@@ -74,7 +94,10 @@ exports.createShift = async (req, res, next) => {
       });
     }
     
-    // Log the received times
+    // Log the received times for debugging
+    console.log('Creating new shift with parameters:');
+    console.log('Employee ID:', employeeId);
+    console.log('Schedule ID:', scheduleId);
     console.log('Received start time:', startTime);
     console.log('Received end time:', endTime);
     
@@ -82,20 +105,18 @@ exports.createShift = async (req, res, next) => {
     const startDateTime = new Date(startTime);
     const endDateTime = new Date(endTime);
     
-    // Adjust for 8 hour difference if needed
-    startDateTime.setHours(startDateTime.getHours() + 8);
-    endDateTime.setHours(endDateTime.getHours() + 8);
+    console.log('Parsed start time:', startDateTime.toISOString());
+    console.log('Parsed end time:', endDateTime.toISOString());
     
-    console.log('Adjusted start time:', startDateTime.toISOString());
-    console.log('Adjusted end time:', endDateTime.toISOString());
-    
-    // Create shift with adjusted times
+    // Create shift with times in ISO format
     const result = await pool.query(
       `INSERT INTO shifts (schedule_id, employee_id, start_time, end_time, status)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [scheduleId, employeeId, startDateTime.toISOString(), endDateTime.toISOString(), status]
     );
+    
+    console.log('Shift created:', result.rows[0]);
     
     res.status(201).json(result.rows[0]);
   } catch (error) {

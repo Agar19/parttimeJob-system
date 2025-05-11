@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
-import { format, addDays, parseISO } from 'date-fns';
+import { format, parseISO, addDays, startOfWeek } from 'date-fns';
 
 const ScheduleView = () => {
   const { scheduleId } = useParams();
@@ -22,7 +22,7 @@ const ScheduleView = () => {
     endTime: '15:00'
   });
   
-  // Days of the week in Mongolian
+  // Days of the week in Mongolian - start with Monday (0)
   const daysOfWeek = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням'];
   
   // Time slots for display
@@ -34,13 +34,19 @@ const ScheduleView = () => {
   
   // Process the schedule data to fill in all time slots covered by each shift
   const processScheduleData = (scheduleData) => {
-    //1 udur uragshlij baisan
     console.log('Processing schedule data:', scheduleData);
-      if (scheduleData && scheduleData.shifts) {
-      Object.keys(scheduleData.shifts).forEach(dateStr => {
-       console.log('Date from server:', dateStr);
-       console.log('Parsed date:', parseISO(dateStr));
-     });
+    
+    if (scheduleData && scheduleData.shifts) {
+      console.log('All dates in schedule:');
+      const dateKeys = Object.keys(scheduleData.shifts);
+      dateKeys.forEach(dateStr => {
+        const date = new Date(dateStr);
+        // get JS day (0 = Sunday, 1 = Monday, etc)
+        const jsDay = date.getDay(); 
+        // convert to our day (0 = Monday, 6 = Sunday)
+        const ourDay = jsDay === 0 ? 6 : jsDay - 1;
+        console.log(`Date: ${dateStr}, JS Day: ${jsDay}, Our Day Index: ${ourDay} (${daysOfWeek[ourDay]})`);
+      });
     }
 
     if (!scheduleData || !scheduleData.shifts) {
@@ -129,6 +135,8 @@ const ScheduleView = () => {
         }
         
         console.log('Week start from server (fixed):', weekStart);
+        console.log('Week start as Date:', new Date(weekStart));
+        console.log('Day of week for week start:', new Date(weekStart).getDay());
         
         setSchedule(scheduleResponse.data);
         
@@ -207,6 +215,7 @@ const ScheduleView = () => {
       // Get the week start date directly from the schedule data
       const weekStartDate = new Date(schedule.weekStart);
       console.log('Week start date:', weekStartDate.toISOString());
+      console.log('Adding day index:', day);
       
       // Calculate the shift date by adding the day index
       const shiftDate = new Date(weekStartDate);
@@ -325,12 +334,20 @@ const ScheduleView = () => {
                 </th>
                 
                 {/* Day columns */}
-                {Object.keys(processedSchedule.shifts).map((dateStr, index) => (
-                  <th key={dateStr} className="py-3 px-6 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                    <div>{daysOfWeek[index]}</div>
-                    <div className="text-gray-400">{format(parseISO(dateStr), 'MM/dd')}</div>
-                  </th>
-                ))}
+                {Object.keys(processedSchedule.shifts).map((dateStr, index) => {
+                  const date = new Date(dateStr);
+                  // Get JS day (0 = Sunday, 1 = Monday, etc)
+                  const jsDay = date.getDay();
+                  // Convert to our day index (0 = Monday, 6 = Sunday)
+                  const ourDay = jsDay === 0 ? 6 : jsDay - 1;
+                  
+                  return (
+                    <th key={dateStr} className="py-3 px-6 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                      <div>{daysOfWeek[ourDay]}</div>
+                      <div className="text-gray-400">{format(parseISO(dateStr), 'MM/dd')}</div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             

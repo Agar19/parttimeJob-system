@@ -12,7 +12,7 @@ const ScheduleCreation = () => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedWeek, setSelectedWeek] = useState(startOfWeek(new Date()));
+  const [selectedWeek, setSelectedWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [schedules, setSchedules] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -35,7 +35,7 @@ const ScheduleCreation = () => {
     additionalNotes: ''
   });
 
-  // Days of the week in Mongolian
+  // Days of the week in Mongolian - starting with Monday
   const daysOfWeek = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням'];
 
   useEffect(() => {
@@ -187,7 +187,7 @@ const ScheduleCreation = () => {
 
   const handleWeekChange = (e) => {
     const date = new Date(e.target.value);
-    setSelectedWeek(startOfWeek(date));
+    setSelectedWeek(startOfWeek(date, { weekStartsOn: 1 }));
   };
 
   const renderWeekDays = () => {

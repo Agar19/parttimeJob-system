@@ -10,7 +10,16 @@ const Availability = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [availability, setAvailability] = useState({});
+  // Important: Updated to use Sunday as day 0
+  const [availability, setAvailability] = useState({
+    0: [], // Sunday
+    1: [], // Monday 
+    2: [], // Tuesday
+    3: [], // Wednesday
+    4: [], // Thursday
+    5: [], // Friday
+    6: []  // Saturday
+  });
   const [employeeId, setEmployeeId] = useState(null);
   const [visibleDays, setVisibleDays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [timeSlotsList, setTimeSlots] = useState([
@@ -32,8 +41,8 @@ const Availability = () => {
     { id: 16, label: '10:00 PM - 11:00 PM', start: '22:00', end: '23:00' },
   ]);
   
-  // Days of week in Mongolian
-  const daysOfWeek = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням'];
+  // Days of week in Mongolian - start with Sunday (0)
+  const daysOfWeek = ['Ням', 'Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба'];
   
   // Load employee's saved availability data
   useEffect(() => {
@@ -53,32 +62,36 @@ const Availability = () => {
           const response = await api.get(`/availability/employee/${user.employee.id}`);
           console.log('Loaded availability data:', response.data);
 
-          // Add this new debug logging
-response.data.forEach(slot => {
-  console.log(`Loaded slot - Day: ${slot.day_of_week}, Time: ${slot.start_time} - ${slot.end_time}`);
-});
-          
           // Format availability data
-          const availabilityMap = {};
-          
-          // Initialize all days with empty arrays
-          for (let i = 0; i < 7; i++) {
-            availabilityMap[i] = [];
-          }
+          const availabilityMap = {
+            0: [], // Sunday
+            1: [], // Monday
+            2: [], // Tuesday
+            3: [], // Wednesday
+            4: [], // Thursday
+            5: [], // Friday
+            6: []  // Saturday
+          };
           
           // Add available time slots
-          // In your fetchData function
-    response.data.forEach(slot => {
-  // Strip seconds from time format
-        const startTime = slot.start_time.substring(0, 5); // Convert "07:00:00" to "07:00"
-        const endTime = slot.end_time.substring(0, 5);   // Convert "08:00:00" to "08:00"
-  
-        availabilityMap[slot.day_of_week].push({
-         id: slot.id,
-         start: startTime,
-         end: endTime
-  });
-});
+          response.data.forEach(slot => {
+            // Strip seconds from time format
+            const startTime = slot.start_time.substring(0, 5); // Convert "07:00:00" to "07:00"
+            const endTime = slot.end_time.substring(0, 5);   // Convert "08:00:00" to "08:00"
+            
+            // Make sure we use the correct day index (using JS day of week)
+            const dayIndex = slot.day_of_week;
+            
+            if (availabilityMap[dayIndex] !== undefined) {
+              availabilityMap[dayIndex].push({
+                id: slot.id,
+                start: startTime,
+                end: endTime
+              });
+            }
+            
+            console.log(`Added availability for day ${dayIndex} (${daysOfWeek[dayIndex]}): ${startTime}-${endTime}`);
+          });
           
           setAvailability(availabilityMap);
           console.log('Processed availability data:', availabilityMap);
@@ -135,7 +148,7 @@ response.data.forEach(slot => {
                   ? JSON.parse(settings.selected_days) 
                   : settings.selected_days;
                 
-                // Filter days of week
+                // Filter days of week - make sure they use 0 = Sunday
                 setVisibleDays(selectedDays.map(Number));
                 console.log('Visible days:', selectedDays);
               } catch (error) {
@@ -196,8 +209,9 @@ response.data.forEach(slot => {
       // Format availability data for API
       const availabilityData = [];
       
+      // Loop through all days using JS day of week (0 = Sunday)
       for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
-        if (availability[dayOfWeek]) {
+        if (availability[dayOfWeek] && availability[dayOfWeek].length > 0) {
           availability[dayOfWeek].forEach(slot => {
             availabilityData.push({
               employeeId,

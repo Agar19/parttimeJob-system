@@ -35,8 +35,94 @@ class ScheduleService {
   }
   
   /**
+   * Store custom settings for a schedule
+   */
+  async _storeCustomSettings(client, scheduleId, settings) {
+    try {
+      // Check if settings already exist
+      const existingSettings = await client.query(
+        'SELECT id FROM schedule_settings WHERE schedule_id = $1',
+        [scheduleId]
+      );
+      
+      // Convert any array properties to JSON strings
+      const processedSettings = { ...settings };
+      if (Array.isArray(processedSettings.selected_days)) {
+        processedSettings.selected_days = JSON.stringify(processedSettings.selected_days);
+      }
+      
+      if (existingSettings.rows.length > 0) {
+        // Update existing settings
+        await client.query(`
+          UPDATE schedule_settings SET
+            selected_days = COALESCE($1, selected_days),
+            start_time = COALESCE($2, start_time),
+            end_time = COALESCE($3, end_time),
+            min_gap_between_shifts = COALESCE($4, min_gap_between_shifts),
+            min_shifts_per_employee = COALESCE($5, min_shifts_per_employee),
+            max_shifts_per_employee = COALESCE($6, max_shifts_per_employee),
+            min_shift_length = COALESCE($7, min_shift_length),
+            max_shift_length = COALESCE($8, max_shift_length),
+            max_employees_per_shift = COALESCE($9, max_employees_per_shift),
+            shift_increment = COALESCE($10, shift_increment),
+            additional_notes = COALESCE($11, additional_notes)
+          WHERE schedule_id = $12
+        `, [
+          processedSettings.selected_days,
+          processedSettings.start_time,
+          processedSettings.end_time,
+          processedSettings.min_gap_between_shifts,
+          processedSettings.min_shifts_per_employee,
+          processedSettings.max_shifts_per_employee,
+          processedSettings.min_shift_length,
+          processedSettings.max_shift_length,
+          processedSettings.max_employees_per_shift,
+          processedSettings.shift_increment,
+          processedSettings.additional_notes,
+          scheduleId
+        ]);
+      } else {
+        // Insert new settings
+        await client.query(`
+          INSERT INTO schedule_settings (
+            schedule_id,
+            selected_days,
+            start_time,
+            end_time,
+            min_gap_between_shifts,
+            min_shifts_per_employee,
+            max_shifts_per_employee,
+            min_shift_length,
+            max_shift_length,
+            max_employees_per_shift,
+            shift_increment,
+            additional_notes
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `, [
+          scheduleId,
+          processedSettings.selected_days,
+          processedSettings.start_time,
+          processedSettings.end_time,
+          processedSettings.min_gap_between_shifts,
+          processedSettings.min_shifts_per_employee,
+          processedSettings.max_shifts_per_employee,
+          processedSettings.min_shift_length,
+          processedSettings.max_shift_length,
+          processedSettings.max_employees_per_shift,
+          processedSettings.shift_increment,
+          processedSettings.additional_notes
+        ]);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error storing custom settings:', error);
+      throw error;
+    }
+  }
+  
+  /**
    * Generate an optimized schedule using employee availability and constraints
-   * Modified to use dynamic parameters from schedule settings
    */
   async generateSchedule(scheduleId, customSettings = null) {
     const client = await pool.connect();
@@ -92,7 +178,8 @@ class ScheduleService {
       }
       
       // Parse schedule settings safely
-      let selectedDays = [0, 1, 2, 3, 4, 5, 6]; // Default to all days
+      // Default to all days (Monday=0 to Sunday=6)
+      let selectedDays = [0, 1, 2, 3, 4, 5, 6]; 
       
       if (scheduleSettings.selected_days) {
         try {
@@ -113,6 +200,9 @@ class ScheduleService {
       }
       
       console.log('Selected days for scheduling:', selectedDays);
+      
+      // Define days of week in Mongolian for logging
+      const daysOfWeek = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням'];
       
       // Get dynamic parameters from settings
       const startTime = scheduleSettings.start_time ? 
@@ -224,6 +314,7 @@ class ScheduleService {
       
       const shiftSlots = [];
       const weekStart = new Date(schedule.week_start);
+      console.log('Week start date:', weekStart.toISOString());
       
       // Define shift times based on settings (more flexible options now)
       const shiftTimes = [];
@@ -249,25 +340,27 @@ class ScheduleService {
       
       console.log(`Created ${shiftTimes.length} different shift time slots`);
       console.log('Creating shift slots for selected days:', selectedDays);
-      console.log('Using week start date:', weekStart);
       
-      // Create shift slots for each selected day - improved implementation
-      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-        // Skip if this day isn't in the selectedDays array
-        if (!selectedDays.includes(dayIndex)) {
-          console.log(`Skipping day ${dayIndex} as it's not selected`);
-          continue;
-        }
-        
-        // Create the date for this day
+      // Helper function to convert from Monday-based index (0=Monday) to JavaScript's Sunday-based date offset
+      const adjustDayForJs = (day) => {
+        // In our system: Monday=0, Tuesday=1, ..., Sunday=6
+        // For date adding: we want offset from the week start date (which is Monday)
+        return day; // If week starts on Monday, no adjustment needed
+      };
+      
+      // Create shift slots for each selected day
+      for (const dayIndex of selectedDays) {
+        // Create the date for this day by adding the dayIndex to the week start date
         const dayDate = new Date(weekStart);
-        dayDate.setDate(weekStart.getDate() + dayIndex);
-        console.log(`Creating shifts for day ${dayIndex} (${dayDate.toISOString()})`);
+        const adjustedDay = adjustDayForJs(dayIndex);
+        dayDate.setDate(weekStart.getDate() + adjustedDay);
+        
+        console.log(`Creating shifts for day ${dayIndex} (${daysOfWeek[dayIndex]}), date: ${dayDate.toISOString()}`);
         
         // Create all shift slots for this day
         for (const shiftTime of shiftTimes) {
           const slot = {
-            day: dayIndex,
+            day: dayIndex, // Store the original day index (0=Monday) for compatibility
             date: new Date(dayDate),
             startTime: shiftTime.start,
             endTime: shiftTime.end,
@@ -449,88 +542,51 @@ class ScheduleService {
   }
   
   /**
-   * Stores custom settings into the schedule_settings table
+   * Add default schedule settings if none exist
    */
-  async _storeCustomSettings(client, scheduleId, customSettings) {
-    console.log('Storing custom settings for schedule:', scheduleId);
-    
+  async _ensureScheduleSettings(client, scheduleId, defaultSettings) {
     // Check if settings already exist
-    const existingSettings = await client.query(
+    const settingsCheck = await client.query(
       'SELECT id FROM schedule_settings WHERE schedule_id = $1',
       [scheduleId]
     );
     
-    if (existingSettings.rows.length > 0) {
-      // Update existing settings
-      await client.query(
-        `UPDATE schedule_settings SET
-          selected_days = $1,
-          start_time = $2,
-          end_time = $3,
-          min_gap_between_shifts = $4,
-          min_shifts_per_employee = $5,
-          max_shifts_per_employee = $6,
-          min_shift_length = $7,
-          max_shift_length = $8,
-          max_employees_per_shift = $9,
-          shift_increment = $10,
-          additional_notes = $11
-        WHERE schedule_id = $12`,
-        [
-          JSON.stringify(customSettings.selected_days || [0,1,2,3,4,5,6]),
-          customSettings.start_time || '07:00',
-          customSettings.end_time || '23:00',
-          customSettings.min_gap_between_shifts || 8,
-          customSettings.min_shifts_per_employee || 1,
-          customSettings.max_shifts_per_employee || 5,
-          customSettings.min_shift_length || 4,
-          customSettings.max_shift_length || 8,
-          customSettings.max_employees_per_shift || 5,
-          customSettings.shift_increment || 2,
-          customSettings.additional_notes || '',
-          scheduleId
-        ]
-      );
-    } else {
-      // Create new settings
+    if (settingsCheck.rows.length === 0) {
+      console.log('Creating default schedule settings');
+      
+      // Create settings with defaults
       await client.query(
         `INSERT INTO schedule_settings (
-          schedule_id,
-          selected_days,
-          start_time,
+          schedule_id, 
+          selected_days, 
+          start_time, 
           end_time,
           min_gap_between_shifts,
           min_shifts_per_employee,
           max_shifts_per_employee,
           min_shift_length,
           max_shift_length,
-          max_employees_per_shift,
-          shift_increment,
-          additional_notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          max_employees_per_shift
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           scheduleId,
-          JSON.stringify(customSettings.selected_days || [0,1,2,3,4,5,6]),
-          customSettings.start_time || '07:00',
-          customSettings.end_time || '23:00',
-          customSettings.min_gap_between_shifts || 8,
-          customSettings.min_shifts_per_employee || 1,
-          customSettings.max_shifts_per_employee || 5,
-          customSettings.min_shift_length || 4,
-          customSettings.max_shift_length || 8,
-          customSettings.max_employees_per_shift || 5,
-          customSettings.shift_increment || 2,
-          customSettings.additional_notes || ''
+          JSON.stringify([0, 1, 2, 3, 4, 5, 6]),
+          defaultSettings.startTime || '07:00',
+          defaultSettings.endTime || '23:00',
+          defaultSettings.minGapBetweenShifts || 8,
+          defaultSettings.minShiftsPerEmployee || 1,
+          defaultSettings.maxShiftsPerEmployee || 5,
+          defaultSettings.minShiftLength || 4,
+          defaultSettings.maxShiftLength || 8,
+          defaultSettings.maxEmployeesPerShift || 3
         ]
       );
     }
-    
-    console.log('Custom settings stored successfully');
   }
   
   /**
    * Enhanced greedy algorithm for initial shift assignments
-   * Prioritizes hard-to-fill shifts first and allows overlapping assignments up to maxEmployeesPerShift
+   * Prioritizes hard-to-fill shifts first and prevents overlapping assignments
    */
   _enhancedGreedyShiftAssignment(employees, employeeAvailability, shiftSlots, constraints, shiftAvailableEmployees, isEmployeeAvailableForShift) {
     console.log('Starting enhanced greedy algorithm with prioritization:', { 
@@ -547,29 +603,22 @@ class ScheduleService {
       employeeShiftCounts[emp.id] = 0;
     });
     
-    // Track assigned shifts by slot to handle employee limits per slot
-    const assignedEmployeesBySlot = {};
-    shiftSlots.forEach(slot => {
-      const slotKey = `${slot.day}-${slot.startTime}-${slot.endTime}`;
-      assignedEmployeesBySlot[slotKey] = [];
-    });
-    
-    // Sort shift slots by available employees and other priorities
+    // Sort shift slots by available employees (ascending), then by length (descending)
     const sortedShiftSlots = [...shiftSlots].sort((a, b) => {
       const keyA = `${a.day}-${a.startTime}-${a.endTime}`;
       const keyB = `${b.day}-${b.startTime}-${b.endTime}`;
       
-      // Sort by available employees (ascending)
+      // Sort by number of available employees (ascending)
       const availableA = shiftAvailableEmployees[keyA] || 0;
       const availableB = shiftAvailableEmployees[keyB] || 0;
       
       if (availableA !== availableB) {
-        return availableA - availableB; // Prioritize hard-to-fill shifts
+        return availableA - availableB; // Prioritize shifts with fewer available employees
       }
       
       // Then by shift length (descending)
-      const lengthA = parseInt(a.endTime) - parseInt(a.startTime);
-      const lengthB = parseInt(b.endTime) - parseInt(b.startTime);
+      const lengthA = this._calculateShiftLengthInHours(a.startTime, a.endTime);
+      const lengthB = this._calculateShiftLengthInHours(b.startTime, b.endTime);
       if (lengthA !== lengthB) {
         return lengthB - lengthA; // Longer shifts first
       }
@@ -579,7 +628,7 @@ class ScheduleService {
       return a.startTime.localeCompare(b.startTime);
     });
     
-    // Track assigned shifts by employee and day to prevent personal overlaps
+    // Track assigned shifts by employee and day to prevent overlaps
     const employeeAssignedShifts = {};
     employees.forEach(emp => {
       employeeAssignedShifts[emp.id] = {};
@@ -588,44 +637,54 @@ class ScheduleService {
       }
     });
     
-    // Assign shifts
+    // Assign each shift
     for (const shift of sortedShiftSlots) {
-      const shiftKey = `${shift.day}-${shift.startTime}-${shift.endTime}`;
-      const currentAssignedCount = assignedEmployeesBySlot[shiftKey].length;
-      
-      // Skip if this shift already has maximum employees
-      if (currentAssignedCount >= constraints.maxEmployeesPerShift) {
-        console.log(`Shift ${shiftKey} already has maximum (${constraints.maxEmployeesPerShift}) employees assigned`);
+      // Skip if this shift already has the maximum allowed employees
+      if (shift.assignedEmployees >= shift.maxEmployees) {
         continue;
       }
       
       // Find available employees for this shift
       const availableEmployees = employees.filter(emp => {
-        // Check if employee is available based on their preferences
+        // Check basic availability
         if (!isEmployeeAvailableForShift(emp, shift, employeeAvailability)) {
           return false;
         }
         
-        // Check if employee is already assigned to this shift
-        if (assignedEmployeesBySlot[shiftKey].includes(emp.id)) {
+        // Check for overlapping shifts on the same day
+        const assignedShiftsOnDay = employeeAssignedShifts[emp.id][shift.day] || [];
+        const hasOverlap = assignedShiftsOnDay.some(assigned => {
+          return this._shiftsOverlap(assigned, shift);
+        });
+        
+        if (hasOverlap) {
           return false;
         }
         
-        // Check for overlapping shifts for this employee
-        const assignedShiftsOnDay = employeeAssignedShifts[emp.id][shift.day] || [];
-        const hasOverlap = assignedShiftsOnDay.some(assigned => {
-          const assignedStart = parseInt(assigned.startTime.split(':')[0]);
-          const assignedEnd = parseInt(assigned.endTime.split(':')[0]);
-          const shiftStart = parseInt(shift.startTime.split(':')[0]);
-          const shiftEnd = parseInt(shift.endTime.split(':')[0]);
+        // Check for minimum rest period between shifts
+        // Get all shifts already assigned to this employee
+        const allAssignedShifts = [];
+        for (let day = 0; day < 7; day++) {
+          if (employeeAssignedShifts[emp.id][day]) {
+            allAssignedShifts.push(...employeeAssignedShifts[emp.id][day]);
+          }
+        }
+        
+        // Check if any assigned shift violates the minimum rest period
+        const violatesRestPeriod = allAssignedShifts.some(assigned => {
+          // Calculate hours between shifts
+          const hoursBetween = this._calculateHoursBetween(
+            assigned.day, assigned.endTime,
+            shift.day, shift.startTime
+          );
           
-          // Check for any overlap - this prevents personal double booking
-          return (shiftStart < assignedEnd && shiftEnd > assignedStart);
+          return hoursBetween > 0 && hoursBetween < constraints.minGapBetweenShifts;
         });
         
-        return !hasOverlap;
+        return !violatesRestPeriod;
       });
       
+      const shiftKey = `${shift.day}-${shift.startTime}-${shift.endTime}`;
       console.log(`Shift ${shiftKey}: ${availableEmployees.length} available employees`);
       
       if (availableEmployees.length > 0) {
@@ -643,7 +702,7 @@ class ScheduleService {
           // Pick from underutilized employees if any exist, otherwise from all eligible employees
           const candidateEmployees = underutilizedEmployees.length > 0 ? underutilizedEmployees : eligibleEmployees;
           
-          // Sort by current shift count (ascending)
+          // Then sort by current shift count (ascending)
           candidateEmployees.sort((a, b) => {
             // First by total shift count
             const countDiff = employeeShiftCounts[a.id] - employeeShiftCounts[b.id];
@@ -655,7 +714,7 @@ class ScheduleService {
             return aShiftsOnDay - bShiftsOnDay;
           });
           
-          // Assign the shift to the selected employee
+          // Assign to employee with fewest shifts
           const assignedEmployee = candidateEmployees[0];
           employeeShiftCounts[assignedEmployee.id]++;
           
@@ -665,75 +724,26 @@ class ScheduleService {
           }
           employeeAssignedShifts[assignedEmployee.id][shift.day].push({
             startTime: shift.startTime,
-            endTime: shift.endTime
+            endTime: shift.endTime,
+            day: shift.day
           });
           
-          // Add to the slot's assigned employees
-          assignedEmployeesBySlot[shiftKey].push(assignedEmployee.id);
-          
+          // Debug info
           console.log(`Assigned to ${assignedEmployee.name} (now has ${employeeShiftCounts[assignedEmployee.id]} shifts)`);
+          
+          // Update the shift's assigned employee count
+          shift.assignedEmployees++;
           
           assignments.push({
             employeeId: assignedEmployee.id,
             day: shift.day,
             date: shift.date,
             startTime: shift.startTime,
-            endTime: shift.endTime,
-            slotKey: shiftKey // Include the slot key for tracking
+            endTime: shift.endTime
           });
           
-          // Try to assign more employees to this shift if within maxEmployeesPerShift limit
-          // This is a recursive part where we assign more employees to the same slot if available
-          // We'll run this for as many times as the configured max employees per shift
-          let additionalAssignedCount = 1; // Start with 1 (we just assigned one)
-          
-          // Keep trying to assign more employees to this shift until maxEmployeesPerShift is reached
-          while (additionalAssignedCount < constraints.maxEmployeesPerShift) {
-            // Update available employees (remove already assigned)
-            const additionalAvailableEmployees = eligibleEmployees.filter(emp => 
-              emp.id !== assignedEmployee.id && 
-              !assignedEmployeesBySlot[shiftKey].includes(emp.id)
-            );
-            
-            if (additionalAvailableEmployees.length === 0) {
-              // No more available employees for this shift
-              break;
-            }
-            
-            // Sort by shift count as before
-            additionalAvailableEmployees.sort((a, b) => 
-              employeeShiftCounts[a.id] - employeeShiftCounts[b.id]
-            );
-            
-            // Assign to the next employee
-            const nextEmployee = additionalAvailableEmployees[0];
-            employeeShiftCounts[nextEmployee.id]++;
-            
-            // Record the assignment
-            if (!employeeAssignedShifts[nextEmployee.id][shift.day]) {
-              employeeAssignedShifts[nextEmployee.id][shift.day] = [];
-            }
-            employeeAssignedShifts[nextEmployee.id][shift.day].push({
-              startTime: shift.startTime,
-              endTime: shift.endTime
-            });
-            
-            // Add to the slot's assigned employees
-            assignedEmployeesBySlot[shiftKey].push(nextEmployee.id);
-            
-            console.log(`Also assigned to ${nextEmployee.name} (now has ${employeeShiftCounts[nextEmployee.id]} shifts)`);
-            
-            assignments.push({
-              employeeId: nextEmployee.id,
-              day: shift.day,
-              date: shift.date,
-              startTime: shift.startTime,
-              endTime: shift.endTime,
-              slotKey: shiftKey
-            });
-            
-            additionalAssignedCount++;
-          }
+          // If we need multiple employees per shift, we can continue assigning
+          // But for now, we'll move to the next shift
         } else {
           console.log(`No eligible employees (all exceeded max shifts)`);
         }
@@ -742,14 +752,13 @@ class ScheduleService {
       }
     }
     
-    console.log(`Enhanced greedy algorithm assigned ${assignments.length} shifts out of ${shiftSlots.length * constraints.maxEmployeesPerShift} possible slots`);
+    console.log(`Enhanced greedy algorithm assigned ${assignments.length} shifts out of ${shiftSlots.length} possible slots`);
     
-    // Calculate coverage percentage
-    const totalPossibleAssignments = shiftSlots.length * constraints.maxEmployeesPerShift;
-    const coveragePercentage = (assignments.length / totalPossibleAssignments) * 100;
+    // Calculate schedule coverage percentage
+    const coveragePercentage = (assignments.length / shiftSlots.length) * 100;
     console.log(`Schedule coverage: ${coveragePercentage.toFixed(2)}%`);
     
-    // Log shift distribution by employee
+    // Log shift distribution per employee
     console.log('Shift distribution:');
     for (const emp of employees) {
       const shiftCount = employeeShiftCounts[emp.id] || 0;
@@ -760,8 +769,36 @@ class ScheduleService {
   }
   
   /**
+   * Check if two shifts overlap in time
+   */
+  _shiftsOverlap(shift1, shift2) {
+    const start1 = parseInt(shift1.startTime.split(':')[0]);
+    const end1 = parseInt(shift1.endTime.split(':')[0]);
+    const start2 = parseInt(shift2.startTime.split(':')[0]);
+    const end2 = parseInt(shift2.endTime.split(':')[0]);
+    
+    // Shifts overlap if one starts before the other ends
+    return (start1 < end2 && start2 < end1);
+  }
+  
+  /**
+   * Calculate shift length in hours
+   */
+  _calculateShiftLengthInHours(startTime, endTime) {
+    const startHour = parseInt(startTime.split(':')[0]);
+    const endHour = parseInt(endTime.split(':')[0]);
+    
+    // Handle overnight shifts
+    if (endHour < startHour) {
+      return (24 - startHour) + endHour;
+    }
+    
+    return endHour - startHour;
+  }
+  
+  /**
    * Backtracking algorithm to optimize the schedule
-   * Modified to handle multiple employees per shift and other custom parameters
+   * Attempts to resolve any constraint violations
    */
   _backtrackOptimize(initialAssignments, employees, employeeAvailability, constraints) {
     // Clone the initial assignments to avoid modifying the original
@@ -777,7 +814,7 @@ class ScheduleService {
         shiftCounts[assignment.employeeId] = (shiftCounts[assignment.employeeId] || 0) + 1;
       });
       
-      // Check maximum shifts per employee violations
+      // Check maximum shifts per employee constraint
       for (const empId in shiftCounts) {
         if (shiftCounts[empId] > constraints.maxShiftsPerEmployee) {
           violations.push({
@@ -787,7 +824,7 @@ class ScheduleService {
           });
         }
         
-        // Check minimum shifts per employee violations
+        // Check minimum shifts per employee constraint
         if (shiftCounts[empId] < constraints.minShiftsPerEmployee) {
           violations.push({
             type: 'minShiftsNotMet',
@@ -797,7 +834,8 @@ class ScheduleService {
         }
       }
       
-      // Check rest time between shifts
+      // Check minimum rest time between shifts
+      // Group assignments by employee
       const employeeAssignments = {};
       assignments.forEach(assignment => {
         if (!employeeAssignments[assignment.employeeId]) {
@@ -806,7 +844,7 @@ class ScheduleService {
         employeeAssignments[assignment.employeeId].push(assignment);
       });
       
-      // Check each employee's consecutive shifts for rest violations
+      // Check each employee's shifts
       for (const empId in employeeAssignments) {
         const shifts = employeeAssignments[empId];
         
@@ -816,7 +854,7 @@ class ScheduleService {
           return a.startTime.localeCompare(b.startTime);
         });
         
-        // Check pairs of shifts for rest time violations
+        // Check consecutive shifts for rest time violations
         for (let i = 0; i < shifts.length - 1; i++) {
           const currentShift = shifts[i];
           const nextShift = shifts[i + 1];
@@ -838,7 +876,7 @@ class ScheduleService {
         }
       }
       
-      // Check for personal overlapping shifts (one person can't be in two places)
+      // Check for overlapping shifts
       for (const empId in employeeAssignments) {
         const shifts = employeeAssignments[empId];
         
@@ -851,13 +889,8 @@ class ScheduleService {
             // Only check shifts on the same day
             if (shift1.day !== shift2.day) continue;
             
-            const start1 = parseInt(shift1.startTime.split(':')[0]);
-            const end1 = parseInt(shift1.endTime.split(':')[0]);
-            const start2 = parseInt(shift2.startTime.split(':')[0]);
-            const end2 = parseInt(shift2.endTime.split(':')[0]);
-            
             // Check for overlap
-            if (start1 < end2 && end1 > start2) {
+            if (this._shiftsOverlap(shift1, shift2)) {
               violations.push({
                 type: 'shiftOverlap',
                 employeeId: empId,
@@ -867,16 +900,6 @@ class ScheduleService {
           }
         }
       }
-      
-      // Check max employees per shift constraint
-      const shiftEmployeeCount = {};
-      assignments.forEach(assignment => {
-        const slotKey = assignment.slotKey || `${assignment.day}-${assignment.startTime}-${assignment.endTime}`;
-        shiftEmployeeCount[slotKey] = (shiftEmployeeCount[slotKey] || 0) + 1;
-      });
-      
-      // No need to handle overstaffing as a violation since that's not an issue now
-      // We want to maximize staffing up to the maximum
       
       return violations;
     };
@@ -1015,33 +1038,6 @@ class ScheduleService {
           }
           
           console.log(`Successfully reassigned ${reassignedCount} of ${excessShifts} excess shifts`);
-          
-          // If still couldn't reassign enough shifts, remove some
-          if (reassignedCount < excessShifts) {
-            const remainingToRemove = excessShifts - reassignedCount;
-            console.log(`Still need to remove ${remainingToRemove} shifts`);
-            
-            // Sort employee shifts by importance (e.g., weekend shifts are less important)
-            const sortedShifts = [...employeeShifts].sort((a, b) => {
-              // Prioritize weekend shifts for removal (5-6 are weekend days)
-              if ((a.day >= 5 && b.day < 5) || (a.day < 5 && b.day >= 5)) {
-                return a.day >= 5 ? -1 : 1;
-              }
-              return 0;
-            });
-            
-            // Remove remaining excess shifts
-            for (let i = 0; i < remainingToRemove && i < sortedShifts.length; i++) {
-              const shiftToRemove = sortedShifts[i];
-              console.log(`Removing shift on day ${shiftToRemove.day} at ${shiftToRemove.startTime}`);
-              
-              modifiedAssignments = modifiedAssignments.filter(
-                a => !(a.employeeId === shiftToRemove.employeeId && 
-                      a.day === shiftToRemove.day && 
-                      a.startTime === shiftToRemove.startTime)
-              );
-            }
-          }
         }
       }
       
@@ -1089,7 +1085,7 @@ class ScheduleService {
         }
       }
       
-      // Handle min shifts not met violations
+      // Handle min shifts not met violations by trying to assign additional shifts
       const minShiftsViolations = violations.filter(v => v.type === 'minShiftsNotMet');
       if (minShiftsViolations.length > 0) {
         console.log(`Processing ${minShiftsViolations.length} minimum shifts violations`);
@@ -1113,14 +1109,7 @@ class ScheduleService {
               // Check if assigning this shift would create overlaps
               const wouldCreateOverlap = modifiedAssignments
                 .filter(a => a.employeeId === violation.employeeId && a.day === shift.day)
-                .some(existingShift => {
-                  const existingStart = parseInt(existingShift.startTime.split(':')[0]);
-                  const existingEnd = parseInt(existingShift.endTime.split(':')[0]);
-                  const shiftStart = parseInt(shift.startTime.split(':')[0]);
-                  const shiftEnd = parseInt(shift.endTime.split(':')[0]);
-                  
-                  return (shiftStart < existingEnd && shiftEnd > existingStart);
-                });
+                .some(existingShift => this._shiftsOverlap(existingShift, shift));
               
               if (!wouldCreateOverlap) {
                 // Check if it would violate rest time with any existing shifts
@@ -1186,107 +1175,6 @@ class ScheduleService {
           }
           
           console.log(`Successfully reassigned ${reassignedCount} of ${neededShifts} needed shifts`);
-          
-          // If still couldn't find enough shifts, try to add new shifts
-          if (reassignedCount < neededShifts) {
-            const remainingToAdd = neededShifts - reassignedCount;
-            console.log(`Still need to add ${remainingToAdd} shifts for ${employee?.name}`);
-            
-            // Find all possible shift slots
-            // Get a list of all unique day-startTime-endTime slots from existing assignments
-            const allSlots = new Set();
-            modifiedAssignments.forEach(assignment => {
-              const slotKey = `${assignment.day}-${assignment.startTime}-${assignment.endTime}`;
-              allSlots.add(slotKey);
-            });
-            
-            // Convert to array and parse
-            const availableSlots = [];
-            
-            // For each slot, check employee availability and current assignments
-            allSlots.forEach(slotKey => {
-              const [day, startTime, endTime] = slotKey.split('-');
-              
-              // Count how many employees currently assigned to this slot
-              const currentAssignedCount = modifiedAssignments.filter(
-                a => a.day === parseInt(day) && 
-                     a.startTime === startTime && 
-                     a.endTime === endTime
-              ).length;
-              
-              // Skip if slot is already at max employees
-              if (currentAssignedCount >= constraints.maxEmployeesPerShift) {
-                return;
-              }
-              
-              // Skip if employee is already assigned to this slot
-              const alreadyAssigned = modifiedAssignments.some(
-                a => a.employeeId === violation.employeeId && 
-                     a.day === parseInt(day) && 
-                     a.startTime === startTime && 
-                     a.endTime === endTime
-              );
-              
-              if (alreadyAssigned) {
-                return;
-              }
-              
-              // Check if employee is available for this slot
-              const sampleShift = {
-                day: parseInt(day),
-                startTime,
-                endTime
-              };
-              
-              const isAvailable = this._isEmployeeAvailableForShift(
-                employee, 
-                sampleShift, 
-                employeeAvailability
-              );
-              
-              if (isAvailable) {
-                // Check for overlaps with existing shifts for this employee
-                const wouldOverlap = modifiedAssignments.some(
-                  a => a.employeeId === violation.employeeId && 
-                       a.day === parseInt(day) &&
-                       ((a.startTime < endTime && a.endTime > startTime))
-                );
-                
-                if (!wouldOverlap) {
-                  // This slot is available for this employee
-                  availableSlots.push({
-                    day: parseInt(day),
-                    startTime,
-                    endTime,
-                    assignedCount: currentAssignedCount
-                  });
-                }
-              }
-            });
-            
-            // Sort available slots by assigned count (ascending)
-            availableSlots.sort((a, b) => a.assignedCount - b.assignedCount);
-            
-            // Add employee to slots
-            const addedCount = Math.min(remainingToAdd, availableSlots.length);
-            for (let i = 0; i < addedCount; i++) {
-              const slot = availableSlots[i];
-              console.log(`Adding new shift for ${employee?.name}: day=${slot.day}, ${slot.startTime}-${slot.endTime}`);
-              
-              // Create a date for this slot
-              const slotDate = new Date();
-              slotDate.setDate(slotDate.getDate() + slot.day);
-              
-              modifiedAssignments.push({
-                employeeId: violation.employeeId,
-                day: slot.day,
-                date: slotDate,
-                startTime: slot.startTime,
-                endTime: slot.endTime,
-                slotKey: `${slot.day}-${slot.startTime}-${slot.endTime}`
-              });
-            }
-          }
         }
       }
       
@@ -1338,56 +1226,36 @@ class ScheduleService {
   _findAlternativeEmployee(shift, employees, employeeAvailability, currentAssignments, constraints) {
     console.log(`Finding alternative employee for shift: day=${shift.day}, time=${shift.startTime}-${shift.endTime}`);
     
-    // Get slot key for checking assigned count
-    const slotKey = shift.slotKey || `${shift.day}-${shift.startTime}-${shift.endTime}`;
-    
-    // Count current employees for this slot
-    const currentAssignedCount = currentAssignments.filter(
-      a => a.slotKey === slotKey || (a.day === shift.day && a.startTime === shift.startTime && a.endTime === shift.endTime)
-    ).length;
-    
     // Find employees available for this shift
     const availableEmployees = employees.filter(emp => {
       // Skip the current employee
       if (emp.id === shift.employeeId) return false;
       
-      // Check if employee is already assigned to this slot
-      const alreadyAssignedToSlot = currentAssignments.some(
-        a => a.employeeId === emp.id && 
-             (a.slotKey === slotKey || (a.day === shift.day && a.startTime === shift.startTime && a.endTime === shift.endTime))
-      );
-      
-      if (alreadyAssignedToSlot) return false;
-      
-      // Check if employee is available based on their preferences
+      // Check if employee is available based on their availability
       if (!this._isEmployeeAvailableForShift(emp, shift, employeeAvailability)) {
         return false;
       }
       
-      // Check for overlapping shifts for this employee (personal double-booking)
+      // Check for overlapping shifts on the same day
       const existingShiftsOnDay = currentAssignments.filter(
         a => a.employeeId === emp.id && a.day === shift.day
       );
       
-      const hasOverlap = existingShiftsOnDay.some(existingShift => {
-        const existingStart = parseInt(existingShift.startTime.split(':')[0]);
-        const existingEnd = parseInt(existingShift.endTime.split(':')[0]);
-        const newStart = parseInt(shift.startTime.split(':')[0]);
-        const newEnd = parseInt(shift.endTime.split(':')[0]);
-        
-        // Check for overlap
-        return (newStart < existingEnd && newEnd > existingStart);
-      });
+      const hasOverlap = existingShiftsOnDay.some(existingShift => 
+        this._shiftsOverlap(existingShift, shift)
+      );
       
       if (hasOverlap) {
         return false;
       }
       
-      // Check max shifts constraint
+      // Check if reassignment would violate constraints
+      // Count current shifts for this employee
       const employeeShiftCount = currentAssignments.filter(
         a => a.employeeId === emp.id
       ).length;
       
+      // Check max shifts constraint
       if (employeeShiftCount >= constraints.maxShiftsPerEmployee) {
         return false;
       }
@@ -1508,214 +1376,6 @@ class ScheduleService {
   }
   
   /**
-   * Add default schedule settings if none exist
-   */
-  async _ensureScheduleSettings(client, scheduleId, defaultSettings) {
-    // Check if settings already exist
-    const settingsCheck = await client.query(
-      'SELECT id FROM schedule_settings WHERE schedule_id = $1',
-      [scheduleId]
-    );
-    
-    if (settingsCheck.rows.length === 0) {
-      console.log('Creating default schedule settings');
-      
-      // Check if we need to create with the new fields
-      let query;
-      let params;
-
-      // Use column check to see if the new columns exist
-      const columnCheckResult = await client.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name='schedule_settings' AND column_name='min_shift_length'
-      `);
-      
-      // If the new columns exist
-      if (columnCheckResult.rows.length > 0) {
-        query = `
-          INSERT INTO schedule_settings (
-            schedule_id,
-            selected_days,
-            start_time,
-            end_time,
-            min_gap_between_shifts,
-            min_shifts_per_employee,
-            max_shifts_per_employee,
-            min_shift_length,
-            max_shift_length,
-            max_employees_per_shift,
-            shift_increment,
-            additional_notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        `;
-        
-        params = [
-          scheduleId,
-          JSON.stringify([0, 1, 2, 3, 4, 5, 6]),
-          defaultSettings.startTime || '07:00',
-          defaultSettings.endTime || '23:00',
-          defaultSettings.minGapBetweenShifts || 8,
-          defaultSettings.minShiftsPerEmployee || 1,
-          defaultSettings.maxShiftsPerEmployee || 5,
-          defaultSettings.minShiftLength || 4,
-          defaultSettings.maxShiftLength || 8,
-          defaultSettings.maxEmployeesPerShift || 5,
-          defaultSettings.shiftIncrement || 2,
-          defaultSettings.additionalNotes || ''
-        ];
-      } else {
-        // Use the old schema
-        query = `
-          INSERT INTO schedule_settings (
-            schedule_id,
-            selected_days,
-            start_time,
-            end_time,
-            min_gap_between_shifts,
-            min_shifts_per_employee,
-            max_shifts_per_employee,
-            additional_notes
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `;
-        
-        params = [
-          scheduleId,
-          JSON.stringify([0, 1, 2, 3, 4, 5, 6]),
-          defaultSettings.startTime || '07:00',
-          defaultSettings.endTime || '23:00',
-          defaultSettings.minGapBetweenShifts || 8,
-          defaultSettings.minShiftsPerEmployee || 1,
-          defaultSettings.maxShiftsPerEmployee || 5,
-          defaultSettings.additionalNotes || ''
-        ];
-      }
-      
-      await client.query(query, params);
-    }
-  }
-  
-  /**
-   * Get all saved schedule settings templates
-   */
-  async getScheduleSettingsTemplates() {
-    try {
-      // Query for all unique schedule settings
-      const result = await pool.query(`
-        SELECT DISTINCT ON (additional_notes) 
-          id, 
-          selected_days, 
-          start_time, 
-          end_time, 
-          min_gap_between_shifts, 
-          min_shifts_per_employee, 
-          max_shifts_per_employee,
-          additional_notes,
-          min_shift_length,
-          max_shift_length,
-          max_employees_per_shift,
-          shift_increment
-        FROM schedule_settings 
-        WHERE additional_notes IS NOT NULL AND additional_notes != '' 
-        ORDER BY additional_notes, created_at DESC
-      `);
-      
-      return result.rows.map(row => {
-        return {
-          id: row.id,
-          name: row.additional_notes,
-          selectedDays: typeof row.selected_days === 'string' ? 
-            JSON.parse(row.selected_days) : row.selected_days,
-          startTime: row.start_time,
-          endTime: row.end_time,
-          minGapBetweenShifts: row.min_gap_between_shifts,
-          minShiftsPerEmployee: row.min_shifts_per_employee,
-          maxShiftsPerEmployee: row.max_shifts_per_employee,
-          minShiftLength: row.min_shift_length || 4,
-          maxShiftLength: row.max_shift_length || 8,
-          maxEmployeesPerShift: row.max_employees_per_shift || 5,
-          shiftIncrement: row.shift_increment || 2
-        };
-      });
-    } catch (error) {
-      console.error('Error fetching schedule settings templates:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Save a schedule settings template
-   */
-  async saveScheduleSettingsTemplate(settingsData) {
-    const client = await pool.connect();
-    
-    try {
-      await client.query('BEGIN');
-      
-      // Add the new columns if they don't exist
-      try {
-        await client.query(`
-          ALTER TABLE schedule_settings 
-          ADD COLUMN IF NOT EXISTS min_shift_length INTEGER,
-          ADD COLUMN IF NOT EXISTS max_shift_length INTEGER,
-          ADD COLUMN IF NOT EXISTS max_employees_per_shift INTEGER,
-          ADD COLUMN IF NOT EXISTS shift_increment INTEGER,
-          ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        `);
-      } catch (alterError) {
-        console.error('Error modifying schedule_settings table:', alterError);
-        // Continue anyway - the columns might already exist
-      }
-      
-      // Insert template as a standalone entry (not tied to any schedule)
-      const result = await client.query(
-        `INSERT INTO schedule_settings (
-          schedule_id,
-          selected_days,
-          start_time,
-          end_time,
-          min_gap_between_shifts,
-          min_shifts_per_employee,
-          max_shifts_per_employee,
-          min_shift_length,
-          max_shift_length,
-          max_employees_per_shift,
-          shift_increment,
-          additional_notes,
-          created_at
-        ) VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
-        RETURNING id`,
-        [
-          JSON.stringify(settingsData.selectedDays || [0,1,2,3,4,5,6]),
-          settingsData.startTime || '07:00',
-          settingsData.endTime || '23:00',
-          settingsData.minGapBetweenShifts || 8,
-          settingsData.minShiftsPerEmployee || 1,
-          settingsData.maxShiftsPerEmployee || 5,
-          settingsData.minShiftLength || 4,
-          settingsData.maxShiftLength || 8,
-          settingsData.maxEmployeesPerShift || 5,
-          settingsData.shiftIncrement || 2,
-          settingsData.name || 'Custom Template'
-        ]
-      );
-      
-      await client.query('COMMIT');
-      
-      return { 
-        id: result.rows[0].id,
-        message: 'Settings template saved successfully' 
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      console.error('Error saving schedule settings template:', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-  
-  /**
    * Generate a simple schedule with default shifts when the complex algorithm fails
    */
   async generateSimpleSchedule(scheduleId) {
@@ -1799,99 +1459,150 @@ class ScheduleService {
   }
   
   /**
-   * Get schedule details with shifts
-   */
-  async getScheduleDetails(scheduleId) {
-    // Get schedule basic info
-    const scheduleResult = await pool.query(
-      `SELECT s.id, s.branch_id, b.name as branch_name, s.week_start, s.created_at
-       FROM schedules s
-       JOIN branches b ON s.branch_id = b.id
-       WHERE s.id = $1`,
-      [scheduleId]
-    );
+ * Get schedule details with shifts
+ */
+async getScheduleDetails(scheduleId) {
+  // Get schedule basic info
+  const scheduleResult = await pool.query(
+    `SELECT s.id, s.branch_id, b.name as branch_name, s.week_start, s.created_at
+     FROM schedules s
+     JOIN branches b ON s.branch_id = b.id
+     WHERE s.id = $1`,
+    [scheduleId]
+  );
+  
+  if (scheduleResult.rows.length === 0) {
+    throw new Error('Schedule not found');
+  }
+  
+  const schedule = scheduleResult.rows[0];
+  
+  // Get shifts
+  const shiftsResult = await pool.query(
+    `SELECT sh.id, sh.employee_id, sh.start_time, sh.end_time, sh.status,
+            e.user_id, u.name as employee_name
+     FROM shifts sh
+     JOIN employees e ON sh.employee_id = e.id
+     JOIN users u ON e.user_id = u.id
+     WHERE sh.schedule_id = $1
+     ORDER BY sh.start_time`,
+    [scheduleId]
+  );
+  
+  const shifts = shiftsResult.rows;
+  console.log(`Found ${shifts.length} shifts for schedule ${scheduleId}`);
+  
+  // Define days of week for logging
+  const daysOfWeek = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням'];
+  
+  // Format shifts by day and time
+  const formattedShifts = {};
+  const weekStart = new Date(schedule.week_start);
+  console.log(`Week start date: ${weekStart.toISOString()}`);
+  
+  for (let day = 0; day < 7; day++) {
+    const date = new Date(weekStart);
+    date.setDate(date.getDate() + day);
+    const dateString = date.toISOString().split('T')[0];
     
-    if (scheduleResult.rows.length === 0) {
-      throw new Error('Schedule not found');
+    // Get the JS day of week (0=Sunday, 1=Monday)
+    const jsDay = date.getDay();
+    // Convert to our day index (0=Monday, 6=Sunday)
+    const ourDay = jsDay === 0 ? 6 : jsDay - 1;
+    
+    console.log(`Initialized day ${day} from week start: ${dateString}, JS day: ${jsDay}, Our day: ${ourDay} (${daysOfWeek[ourDay]})`);
+    
+    formattedShifts[dateString] = {};
+    
+    // Define common shift times
+    const shiftTimes = ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', 
+                       '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', 
+                       '21:00', '22:00', '23:00'];
+    
+    for (const time of shiftTimes) {
+      formattedShifts[dateString][time] = [];
     }
+  }
+  
+  // Add shifts to the formatted structure
+  shifts.forEach(shift => {
+    const startTime = new Date(shift.start_time);
+    const endTime = new Date(shift.end_time);
+    const dateString = startTime.toISOString().split('T')[0];
     
-    const schedule = scheduleResult.rows[0];
+    console.log(`Processing shift: ${shift.id}, Date: ${dateString}, Start: ${startTime.toISOString()}, End: ${endTime.toISOString()}`);
     
-    // Get shifts
-    const shiftsResult = await pool.query(
-      `SELECT sh.id, sh.employee_id, sh.start_time, sh.end_time, sh.status,
-              e.user_id, u.name as employee_name
-       FROM shifts sh
-       JOIN employees e ON sh.employee_id = e.id
-       JOIN users u ON e.user_id = u.id
-       WHERE sh.schedule_id = $1
-       ORDER BY sh.start_time`,
-      [scheduleId]
-    );
+    // Get all hours this shift spans
+    const startHour = startTime.getHours();
+    const endHour = endTime.getHours();
     
-    const shifts = shiftsResult.rows;
-    
-    // Format shifts by day and time
-    const formattedShifts = {};
-    const weekStart = new Date(schedule.week_start);
-    
-    for (let day = 0; day < 7; day++) {
-      const date = new Date(weekStart);
-      date.setDate(date.getDate() + day);
-      const dateString = date.toISOString().split('T')[0];
+    // Check if this shift's date is in our formatted structure
+    if (!formattedShifts[dateString]) {
+      console.log(`Warning: Shift date ${dateString} not found in initialized dates. Finding closest match...`);
+      // Find the closest date
+      const closestDate = Object.keys(formattedShifts).reduce((closest, date) => {
+        const diff1 = Math.abs(new Date(dateString) - new Date(closest));
+        const diff2 = Math.abs(new Date(dateString) - new Date(date));
+        return diff2 < diff1 ? date : closest;
+      }, Object.keys(formattedShifts)[0]);
       
-      formattedShifts[dateString] = {};
+      console.log(`Using ${closestDate} as the closest match for ${dateString}`);
       
-      // Define common shift times
-      const shiftTimes = ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', 
-                         '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', 
-                         '21:00', '22:00', '23:00'];
-      
-      for (const time of shiftTimes) {
-        formattedShifts[dateString][time] = [];
+      // Add the shift to each hour's array that it spans in the closest date
+      for (let hour = startHour; hour <= endHour; hour++) {
+        const timeString = `${String(hour).padStart(2, '0')}:00`;
+        
+        if (formattedShifts[closestDate] && formattedShifts[closestDate][timeString]) {
+          // Add a flag to indicate this is a continuation of a shift
+          const isContinuation = hour > startHour;
+          
+          formattedShifts[closestDate][timeString].push({
+            id: shift.id,
+            employeeId: shift.employee_id,
+            employeeName: shift.employee_name,
+            startTime: shift.start_time,
+            endTime: shift.end_time,
+            status: shift.status,
+            isContinuation 
+          });
+          
+          console.log(`Added shift to closest date ${closestDate} at time ${timeString}`);
+        }
+      }
+    } else {
+      // Add the shift to each hour's array that it spans
+      for (let hour = startHour; hour <= endHour; hour++) {
+        const timeString = `${String(hour).padStart(2, '0')}:00`;
+        
+        if (formattedShifts[dateString] && formattedShifts[dateString][timeString]) {
+          // Add a flag to indicate this is a continuation of a shift
+          const isContinuation = hour > startHour;
+          
+          formattedShifts[dateString][timeString].push({
+            id: shift.id,
+            employeeId: shift.employee_id,
+            employeeName: shift.employee_name,
+            startTime: shift.start_time,
+            endTime: shift.end_time,
+            status: shift.status,
+            isContinuation
+          });
+          
+          console.log(`Added shift to ${dateString} at time ${timeString}`);
+        }
       }
     }
-    
-    // Add shifts to the formatted structure - revised version
-shifts.forEach(shift => {
-  const startTime = new Date(shift.start_time);
-  const endTime = new Date(shift.end_time);
-  const dateString = startTime.toISOString().split('T')[0];
+  });
   
-  // Get all hours this shift spans
-  const startHour = startTime.getHours();
-  const endHour = endTime.getHours();
-  
-  // Add the shift to each hour's array that it spans
-  for (let hour = startHour; hour <= endHour; hour++) {
-    const timeString = `${String(hour).padStart(2, '0')}:00`;
-    
-    if (formattedShifts[dateString] && formattedShifts[dateString][timeString]) {
-      // Add a flag to indicate this is a continuation of a shift
-      const isContinuation = hour > startHour;
-      
-      formattedShifts[dateString][timeString].push({
-        id: shift.id,
-        employeeId: shift.employee_id,
-        employeeName: shift.employee_name,
-        startTime: shift.start_time,
-        endTime: shift.end_time,
-        status: shift.status,
-        isContinuation // Optional flag that your frontend could use
-      });
-    }
-  }
-});
-    
-    return {
-      id: schedule.id,
-      branchId: schedule.branch_id,
-      branchName: schedule.branch_name,
-      weekStart: schedule.week_start,
-      createdAt: schedule.created_at,
-      shifts: formattedShifts
-    };
-  }
+  return {
+    id: schedule.id,
+    branchId: schedule.branch_id,
+    branchName: schedule.branch_name,
+    weekStart: schedule.week_start,
+    createdAt: schedule.created_at,
+    shifts: formattedShifts
+  };
+}
   
   /**
    * Update shift status

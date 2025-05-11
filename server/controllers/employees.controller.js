@@ -1,5 +1,5 @@
 const { pool } = require('../app');
-
+const bcrypt = require('bcrypt');
 /**
  * Get all employees
  */

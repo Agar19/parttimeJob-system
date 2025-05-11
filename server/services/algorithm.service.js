@@ -13,6 +13,12 @@ class SchedulingAlgorithm {
      * @returns {Array} Schedule of shifts assigned to employees
      */
     generateSchedule(employees, employeeAvailability, shiftSlots, constraints = {}) {
+      // Define days of week array (for logging purposes)
+      const daysOfWeek = ['Ням', 'Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба'];
+      
+      console.log('Generating schedule for', employees.length, 'employees and', shiftSlots.length, 'shift slots');
+      console.log('Using day convention: 0 =', daysOfWeek[0]);
+
       // Initial assignments using greedy algorithm
       const initialAssignments = this._greedyAssignment(employees, employeeAvailability, shiftSlots);
       
@@ -193,9 +199,12 @@ class SchedulingAlgorithm {
             
             // Sort by least important (e.g., weekend shifts might be less important)
             const sortedShifts = [...employeeShifts].sort((a, b) => {
-              // Prioritize weekdays over weekends (0-4 are weekdays, 5-6 are weekend)
-              if ((a.day < 5 && b.day >= 5) || (a.day >= 5 && b.day < 5)) {
-                return a.day < 5 ? 1 : -1;
+              // Prioritize weekdays over weekends (0=Sun, 6=Sat are weekends)
+              if ((a.day === 0 || a.day === 6) && (b.day > 0 && b.day < 6)) {
+                return -1; // Weekends first (less important)
+              }
+              if ((b.day === 0 || b.day === 6) && (a.day > 0 && a.day < 6)) {
+                return 1; // Weekends first (less important)
               }
               return 0;
             });
