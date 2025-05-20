@@ -80,21 +80,9 @@ const ShiftView = () => {
     setSelectedWeek(newWeekStart);
   };
   
-  const handleRequestChange = async (shiftId) => {
-    try {
-      // Create a change request
-      await api.post('/requests', {
-        employeeId: user.employee.id,
-        shiftId,
-      });
-      
-      // Update UI
-      alert('Хүсэлт амжилттай илгээгдлээ.');
-    } catch (err) {
-      setError('Failed to submit request');
-      console.error(err);
-    }
-  };
+  const handleRequestChange = (shiftId) => {
+  navigate('/employee/shift-trades', { state: { selectedShiftId: shiftId } });
+};
   
   // Group shifts by day
   const groupShiftsByDay = () => {

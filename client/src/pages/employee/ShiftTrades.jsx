@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
@@ -8,6 +8,7 @@ import { formatLocalDate, formatTimeOnly } from '../../utils/dateUtils';
 const ShiftTrades = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -22,8 +23,38 @@ const ShiftTrades = () => {
   const [tradeNotes, setTradeNotes] = useState('');
   
   useEffect(() => {
-    fetchData();
-  }, []);
+    const loadData = async () => {
+      await fetchData();
+      
+      // Check if we have a selected shift from navigation
+      if (location.state?.selectedShiftId) {
+        const shift = myShifts.find(s => s.id === location.state.selectedShiftId);
+        if (shift) {
+          setSelectedShift(shift);
+          setIsOfferModalOpen(true); // Open the modal automatically
+        }
+      }
+    };
+    
+    loadData();
+    
+    // If shifts haven't loaded yet, set up a check to look for the shift after data loads
+    if (location.state?.selectedShiftId && myShifts.length === 0) {
+      const checkForShift = setInterval(() => {
+        if (myShifts.length > 0) {
+          const shift = myShifts.find(s => s.id === location.state.selectedShiftId);
+          if (shift) {
+            setSelectedShift(shift);
+            setIsOfferModalOpen(true);
+            clearInterval(checkForShift);
+          }
+        }
+      }, 500);
+      
+      // Cleanup interval on component unmount
+      return () => clearInterval(checkForShift);
+    }
+  }, [location, myShifts.length]);
   
   const fetchData = async () => {
     try {
@@ -49,12 +80,31 @@ const ShiftTrades = () => {
         }
       });
       
+      // Correct timezone issues in shift data
+      const correctedShifts = shiftsResponse.data.map(shift => {
+        // Create new date objects to avoid timezone shifts
+        const startDate = new Date(shift.start_time);
+        const endDate = new Date(shift.end_time);
+        
+        // Format to ISO string but remove the timezone part
+        const localStartTime = startDate.toISOString().split('T')[0] + 
+          'T' + startDate.toTimeString().slice(0, 8);
+        const localEndTime = endDate.toISOString().split('T')[0] + 
+          'T' + endDate.toTimeString().slice(0, 8);
+        
+        return {
+          ...shift,
+          start_time: localStartTime,
+          end_time: localEndTime
+        };
+      });
+      
       // Filter out shifts that already have pending trade requests
       const shiftsWithTrades = tradesResponse.data
         .filter(trade => trade.status === 'Pending')
         .map(trade => trade.shift_id);
       
-      const availableShifts = shiftsResponse.data.filter(
+      const availableShifts = correctedShifts.filter(
         shift => !shiftsWithTrades.includes(shift.id)
       );
       
